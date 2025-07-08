@@ -123,4 +123,4 @@ verbose    = False                # Modo detallado
 
 ## Licencia
 
-Este proyecto se distribuye bajo la [Licencia MIT](LICENSE).
+Este proyecto se distribuye bajo la [Licencia GPLv3.0](LICENSE).
