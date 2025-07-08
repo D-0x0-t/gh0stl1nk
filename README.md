@@ -1,6 +1,6 @@
 # WAPA gh0stl1nk
 
-Una herramienta de mensajería y transferencia de archivos segura y oculta, construida sobre Wi-Fi (802.11) usando **Scapy** y **AES-CBC**. Permite enviar mensajes cifrados y fragmentar/ensamblar archivos de forma transparente, con confirmaciones de recepción (ACKs) automáticas y detección de duplicados.
+Un *covert channel* para envío de mensajes y tranferencia de ficheros construida sobre el protocolo 802.11 usando **Scapy** y **AES-CBC**. Permite enviar mensajes cifrados y fragmentar/ensamblar archivos de forma transparente, con confirmaciones de recepción (ACKs) automáticas y detección de duplicados.
 
 ---
 
@@ -31,12 +31,12 @@ pip install scapy pycryptodome
 
 1. Clona este repositorio:
    ```bash
-   git clone https://github.com/tu_usuario/wapa-gh0stl1nk.git
-   cd wapa-gh0stl1nk
+   git clone https://github.com/tu_usuario/wapa_ghostlink.git
+   cd wapa_ghostlink
    ```
 2. Instala las dependencias con `pip` (ver sección **Requisitos** arriba):
    ```bash
-   pip install scapy pycryptodome
+   pip install -r requirements.txt
    ```
 
 ---
@@ -68,13 +68,13 @@ verbose    = False                # Modo detallado
 
 1. **Iniciar la herramienta**:
    ```bash
-   python gh0stl1nk.py
+   python ghostlink.py
    ```
 2. **Responder a los prompts**:
    ```
    [>] Select the interface to use: mon1
    [>] Enter your username: d0t
-   [>] Enter the room name: mysecretroom
+   [>] Enter the room name: secretr00m
    ```
 3. **Enviar mensajes**:
    - Escribe texto y presiona **Enter**.
@@ -101,8 +101,8 @@ verbose    = False                # Modo detallado
 
 ```
 .
-├── gh0stl1nk.py      # Script principal
-├── protocol.py       # Funciones de fragmentación y descifrado de fragmentos
+├── ghostlink.py      # Script principal
+├── protocol.py       # Funciones de fragmentación y desfragmentación
 ├── LICENSE           # Licencia MIT
 └── README.md         # Documentación
 ```

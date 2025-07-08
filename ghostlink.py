@@ -1,3 +1,19 @@
+# gh0stl1nk.py — WAPA ghostlink
+# Copyright (C) 2025 D0t
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import time
 import base64
 import logging
@@ -21,7 +37,7 @@ count = 5
 maxpayload = 1024
 verbose = False
 
-bootime = time.time()
+bootime = time.time()º
 file_sessions = {}
 recent_messages = set()
 recent_queue = deque()
