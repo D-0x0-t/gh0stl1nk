@@ -37,7 +37,7 @@ count = 5
 maxpayload = 1024
 verbose = False
 
-bootime = time.time()º
+bootime = time.time()
 file_sessions = {}
 recent_messages = set()
 recent_queue = deque()
@@ -116,6 +116,16 @@ def send_plain(msg):
     for _ in range(count):
         sendp(pkt, iface=iface, verbose=0)
 
+def announce_user(user):
+    """
+    Anuncio de nuevos usuarios conectados en la room.
+    """
+    encrypted_ann = chatencrypt("[USR-ANN]:" + str(user))
+    pkt = build_packet(encrypted_ann)
+    for _ in range(10):
+        sendp(pkt, iface=iface, verbose=0)
+
+
 def send_encrypted_msg(msg):
     """
     Envía un mensaje cifrado y retransmite hasta recibir ACK.
@@ -161,6 +171,12 @@ def handle_ack(msg):
                 if verbose:
                     print(f"[ACK] Confirmación recibida para {ack_hash}, {msg}")
                 del ack_wait[ack_hash]
+
+def user_joined(msg):
+    sys.stdout.write("\r" + " " * (len("mensaje> ") + len(current_input)) + "\r")
+    print(f"[!] User {msg.split(':', 1)[1].strip()} just joined the room.")
+    sys.stdout.write("mensaje> " + current_input)
+    sys.stdout.flush()
 
 def is_duplicate(payload):
     digest = sha256(payload).digest()
@@ -245,7 +261,9 @@ def packet_handler(pkt):
                 return
             if user and msg: 
                 if msg.startswith("[RCV-ACK]"):
-                    handle_ack(msg) 
+                    handle_ack(msg)
+                elif msg.startswith("[USR-ANN]"):
+                    user_joined(msg)
                 else:
                     #print(f"\n[{user}]: {msg}")                 
                     pretty_printer(user, msg)                   # print received packet
@@ -288,4 +306,6 @@ if __name__ == "__main__":
     key = input("[>] Enter the room name: ") # ajustar padding a 16
     cipher_key = adjust_psk(key)
     threading.Thread(target=start_sniffer, daemon=True).start()
+    # Send user announcement
+    announce_user(username)
     input_loop()
