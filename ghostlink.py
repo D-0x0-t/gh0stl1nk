@@ -28,7 +28,7 @@ from scapy.all import *
 from protocol import fragment_file, decrypt_fragment, parse_decrypted
 
 # ==============================
-# CONFIGURACIÓN GENERAL (esto tiene que venir parametrizado o cargado desde consola al iniciar, no hardcodeado)
+#       General config
 # ==============================
 iface = "mon1"                      #| default
 username = "d0t"                    #| default
@@ -36,6 +36,7 @@ cipher_key = b"mysharedsecret00"    #| default (16 caracteres)
 count = 5
 maxpayload = 1024
 verbose = False
+input_request_message = "message> "
 
 bootime = time.time()
 file_sessions = {}
@@ -47,12 +48,12 @@ ack_lock = threading.Lock()
 current_input = ""
 
 # ==============================
-# UTILIDADES
+#            Utils
 # ==============================
 def pretty_printer(user, msg):
-    sys.stdout.write("\r" + " " * (len("mensaje> ") + len(current_input)) + "\r")
+    sys.stdout.write("\r" + " " * (len(input_request_message) + len(current_input)) + "\r")
     print(f"[{user}]: {msg}")
-    sys.stdout.write("mensaje> " + current_input)
+    sys.stdout.write(input_request_message + current_input)
     sys.stdout.flush()
 
 def current_timestamp():
@@ -94,9 +95,9 @@ def build_packet(encrypted_msg):
 
 def wait_for_ack(msg_hash, timeout=1.0, interval=0.05):
     """
-    Espera hasta `timeout` segundos a que msg_hash desaparezca de ack_wait.
-    Comprueba cada `interval` segundos.
-    Devuelve True si llegó el ACK, False si expiró.
+    Wait for ACKs.
+    Checks again every 'interval' seconds.
+    If ACK, True, else False.
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -108,19 +109,21 @@ def wait_for_ack(msg_hash, timeout=1.0, interval=0.05):
 
 def send_plain(msg):
     """
-    Envía un mensaje cifrado pero SIN esperar ACK ni registrarlo.
-    Ideal para enviar los [RCV-ACK] y otros mensajes específicos del protocolo Gl1nk.
+    Sends an encrypted message without waiting for an ACK (announcements).
     """
     encrypted = chatencrypt(msg)
     pkt = build_packet(encrypted)
     for _ in range(count):
         sendp(pkt, iface=iface, verbose=0)
 
-def announce_user(user):
+def announce_user(user, status):
     """
-    Anuncio de nuevos usuarios conectados en la room.
+    Announce users in the room (either new users or users that left the channel)
     """
-    encrypted_ann = chatencrypt("[USR-ANN]:" + str(user))
+    if status == "join":
+        encrypted_ann = chatencrypt("[USR-ANN]:" + str(user))
+    elif status == "left":
+        encrypted_ann = chatencrypt("[USR-LFT]:" + str(user))
     pkt = build_packet(encrypted_ann)
     for _ in range(10):
         sendp(pkt, iface=iface, verbose=0)
@@ -128,9 +131,9 @@ def announce_user(user):
 
 def send_encrypted_msg(msg):
     """
-    Envía un mensaje cifrado y retransmite hasta recibir ACK.
+    Sends the encrypted message and wait for the ACK
     """
-    # Mensajes vacíos: sin ACK
+    # Empty messages (no ACK)
     if not msg.strip():
         encrypted = chatencrypt(msg)
         pkt = build_packet(encrypted)
@@ -142,19 +145,19 @@ def send_encrypted_msg(msg):
     pkt       = build_packet(encrypted)
     msg_hash  = checksum(encrypted)
 
-    # Registrar en espera de ACK
+    # ACK waitlist
     with ack_lock:
         ack_wait[msg_hash] = time.time()
     if verbose:
         print(f"[ghostlink] awaiting ACK for {msg_hash}")
 
-    # Retransmisión + espera
+    # Transmissions + await for ACK
     for attempt in range(count):
         sendp(pkt, iface=iface, verbose=0)
         if verbose:
             print(f"[ghostlink] sent {msg_hash}, attempt {attempt+1}/{count}")
 
-        # Aquí es donde comprobamos realmente la llegada del ACK
+        # ACK waiting space
         if wait_for_ack(msg_hash, timeout=1.0):
             if verbose:
                 print(f"[ACK] received for {msg_hash}")
@@ -173,9 +176,15 @@ def handle_ack(msg):
                 del ack_wait[ack_hash]
 
 def user_joined(msg):
-    sys.stdout.write("\r" + " " * (len("mensaje> ") + len(current_input)) + "\r")
+    sys.stdout.write("\r" + " " * (len(input_request_message) + len(current_input)) + "\r")
     print(f"[!] User {msg.split(':', 1)[1].strip()} just joined the room.")
-    sys.stdout.write("mensaje> " + current_input)
+    sys.stdout.write(input_request_message + current_input)
+    sys.stdout.flush()
+
+def user_left(msg):
+    sys.stdout.write("\r" + " " * (len(input_request_message) + len(current_input)) + "\r")
+    print(f"[!] User {msg.split(':', 1)[1].strip()} left the room.")
+    sys.stdout.write(input_request_message + current_input)
     sys.stdout.flush()
 
 def is_duplicate(payload):
@@ -201,7 +210,7 @@ def send_file(path):
         print(f"  - Fragmento {i}/{len(fragments)} enviado")
 
 # ==============================
-# RECEPCION
+#      Package Reception
 # ==============================
 def save_file(session_id, fragments_dict):
     ordered = [fragments_dict[i] for i in sorted(fragments_dict.keys())]
@@ -253,17 +262,19 @@ def packet_handler(pkt):
         raw_data = pkt[Raw].load
         if is_duplicate(raw_data):
             return
-        if is_fragmented_file(raw_data): # camino específico para archivos
+        if is_fragmented_file(raw_data): # file transmission
             handle_fragment(raw_data)
-        else: # camino específico para mensajería
+        else: # message transmission
             user, msg = decrypt_payload(raw_data)
-            if user == username: # filtramos mensajes propios
+            if user == username: # filter own messages (only by username)
                 return
             if user and msg: 
                 if msg.startswith("[RCV-ACK]"):
                     handle_ack(msg)
                 elif msg.startswith("[USR-ANN]"):
                     user_joined(msg)
+                elif msg.startswith("[USR-LFT]"):
+                    user_left(msg)
                 else:
                     #print(f"\n[{user}]: {msg}")                 
                     pretty_printer(user, msg)                   # print received packet
@@ -285,8 +296,10 @@ def input_loop():
     global current_input
     while True:
         try:
-            current_input = input("mensaje> ")
-            if current_input.lower() == "quit" or current_input.lower() == "exit":
+            current_input = input(input_request_message)
+            if current_input.lower() == "!quit" or current_input.lower() == "!exit" or current_input.lower() == "!bye":
+                announce_user(username, "left")
+                print("\n[!] Exitting.")
                 break
             elif current_input.startswith("!{") and current_input.endswith("}"):
                 send_file(current_input[2:-1].strip())
@@ -294,7 +307,8 @@ def input_loop():
                 send_encrypted_msg(current_input)
                 current_input = ""
         except KeyboardInterrupt:
-            print("\n[!] Interrumpido por el usuario.")
+            announce_user(username, "left")
+            print("\n[!] Exitting.")
             break
 
 if __name__ == "__main__":
@@ -303,9 +317,9 @@ if __name__ == "__main__":
     print("=" * len(greeting))
     iface = input("[>] Select the interface to use: ")
     username = input("[>] Enter your username: ")
-    key = input("[>] Enter the room name: ") # ajustar padding a 16
+    key = input("[>] Enter the room name: ") # adjust padding to 16
     cipher_key = adjust_psk(key)
     threading.Thread(target=start_sniffer, daemon=True).start()
     # Send user announcement
-    announce_user(username)
+    announce_user(username, "join")
     input_loop()
