@@ -125,7 +125,7 @@ def announce_user(user, status):
     elif status == "left":
         encrypted_ann = chatencrypt("[USR-LFT]:" + str(user))
     pkt = build_packet(encrypted_ann)
-    for _ in range(10):
+    for _ in range(25):
         sendp(pkt, iface=iface, verbose=0)
 
 
