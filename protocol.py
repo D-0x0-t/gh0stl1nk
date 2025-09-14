@@ -63,7 +63,7 @@ def decrypt_fragment(payload_b64: bytes) -> bytes:
 def fragment_file(file_path: str) -> list[bytes]:
     with open(file_path, "rb") as f:
         content = f.read()
-    session_id = uuid.uuid4().hex[:8]  # ID corto de sesión
+    session_id = uuid.uuid4().hex[:8]
     chunks = []
     max_data = MAX_PAYLOAD - 32  # Reservamos para metadatos
 

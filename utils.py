@@ -11,6 +11,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from Crypto.Random import get_random_bytes
 from scapy.all import RadioTap, Dot11, Raw, sendp
+from scapy.layers.dot11 import Dot11, Dot11Elt, DOt11Beacon, RadioTap
 from protocol import *
 
 maxpayload = 1024
@@ -199,3 +200,28 @@ def send_file(path):
         sendp(pkt, iface=iface, count=count, verbose=0)
         print(f"  - Fragment {i}/{len(fragments)} sent")
 
+
+# =========================
+# Beacon anouncement
+# =========================
+def create_beacon_frame(room_name, bssid_mac_address):
+    essid_name = f"GL-R00m: {str(room_name)}"
+    essid = Dot11Elt(ID="SSID", info=essid_name, len=len(essid_name))
+    dot11 = Dot11(proto=0, type=0, subtype=8, addr1="ff:ff:ff:ff:ff:ff", addr2=bssid_mac_address, addr3=bssid_mac_address)
+    beacon = DOt11Beacon(cap="ESS+privacy")
+    rsn = Dot11Elt(ID="RSNinfo", info=(
+        b"\x01\x00"
+        b"\x00\x0f\xac\x02"
+        b"\x02\x00"
+        b"\x00\x0f\xac\x04"
+        b"\x00\x0f\xac\x02"
+        b"\x01\x00"
+        b"\x00\x0f\xac\x02"
+        b"\x00\x00"
+    ))
+
+    dsset = Dot11Elt(ID="DSset",info="\x01")
+    tim = Dot11Elt(ID="TIM",info="\x00\x01\x00\x00") # Traffic Indication Map
+    rates = Dot11Elt(ID="Rates",info="\x02\x04\x0b\x16\x0c\x12\x18\x24\x30\x48\x60\x6c") # Modern rates for WiFi networks
+
+    return RadioTap()/dot11/beacon/essid/rsn/rates/dsset/tim
