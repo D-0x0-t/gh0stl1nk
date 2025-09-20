@@ -81,7 +81,7 @@ def build_packet(encrypted_msg):
     """
     global persistent_mac
     dot11 = Dot11(type=0, subtype=13, addr1="ff:ff:ff:ff:ff:ff", addr2=persistent_mac, addr3="ff:ff:ff:ff:ff:ff")
-    pkt = RadioTap()/dot11/Raw(load=encrypted_msg)
+    pkt = RadioTap()/dot11/Dot11Action(category=69)/Raw(load=encrypted_msg)
     pkt.timestamp = current_timestamp()
     return pkt
 
@@ -106,7 +106,7 @@ def send_plain(user, msg):
     encrypted = chatencrypt(user, msg, )
     pkt = build_packet(encrypted)
     for _ in range(count):
-        sendp(pkt, iface=iface, verbose=0)
+        sendp(pkt, monitor=True, iface=iface, verbose=0)
 
 def send_encrypted_msg(user, msg):
     """
@@ -117,7 +117,7 @@ def send_encrypted_msg(user, msg):
         encrypted = chatencrypt(user, msg)
         pkt = build_packet(encrypted)
         for _ in range(count):
-            sendp(pkt, iface=iface, verbose=0)
+            sendp(pkt, monitor=True, iface=iface, verbose=0)
         return
 
     encrypted = chatencrypt(user, msg)
@@ -130,7 +130,7 @@ def send_encrypted_msg(user, msg):
         print(f"[ghostlink] awaiting ACK for {msg_hash}")
 
     for attempt in range(count):
-        sendp(pkt, iface=iface, verbose=0)
+        sendp(pkt, monitor=True, iface=iface, verbose=0)
         if verbose:
             print(f"[ghostlink] sent {msg_hash}, attempt {attempt+1}/{count}")
 
@@ -197,12 +197,12 @@ def send_file(path):
     print(f"[>] Sending {len(fragments)} fragments from: {path}")
     for i, frag in enumerate(fragments, 1):
         pkt = build_packet(frag)
-        sendp(pkt, iface=iface, count=count, verbose=0)
+        sendp(pkt, monitor=True, iface=iface, count=count, verbose=0)
         print(f"  - Fragment {i}/{len(fragments)} sent")
 
 
 # =========================
-# Beacon anouncement
+# Beacon anouncement # testing
 # =========================
 def create_beacon_frame(room_name, bssid_mac_address):
     essid_name = f"GL-R00m: {str(room_name)}"

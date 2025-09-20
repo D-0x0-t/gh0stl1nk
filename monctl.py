@@ -64,8 +64,11 @@ try:
 	iface = str(sys.argv[1]).lower()
 	if iface.lower() == "kill" or iface.lower() == "del":
 		iface = str(sys.argv[2])
+		if not iface_exists(iface):
+			print(f"Interface {iface} isn't shown under /sys/class/net/.\nPlease try again or check your antennas.")
+			sys.exit(6)
 		mon_iface_name = "mon" + iface[-1:]
-		if not phy_allows_vifs(iface_to_phy(iface)):
+		if not phy_allows_vifs(iface_to_phy(mon_iface_name)):
 			natural_iface_name = "wlan" + iface[-1:]
 			p = log.progress(f"Restablishing {mon_iface_name} into {natural_iface_name}")
 			rc, out = _run(f"ip link set {mon_iface_name} down", timeout=3.0)
@@ -85,6 +88,9 @@ try:
 	else:
 		mon_iface_name = "mon" + iface[-1:]
 		if iface_exists(iface):
+			if not iface_exists(iface):
+				print(f"Interface {iface} isn't shown under /sys/class/net/.\nPlease try again or check your antennas.")
+				sys.exit(6)
 			# Check if driver/phy allows virtualization of interfaces
 			if not phy_allows_vifs(iface_to_phy(iface)):
 				p = log.progress(f"Establishing {iface} in monitor mode and changing name to {mon_iface_name}")
@@ -107,8 +113,6 @@ try:
 				rc, out = _run(cmd2)
 				sleep(timer)
 				p.success("Done")
-		else:
-			print(f"Interface {iface} isn't shown under /sys/class/net/.\nPlease try again or check your antennas.")
-except Error as e:
+except Exception as e:
 	print(e)
 	print(f"Usage: python3 {sys.argv[0]} [kill|del] <physical interface>")

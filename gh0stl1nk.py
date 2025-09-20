@@ -172,7 +172,7 @@ def build_packet(encrypted_msg):
     """
     global persistent_mac
     dot11 = Dot11(type=0, subtype=13, addr1="ff:ff:ff:ff:ff:ff", addr2=persistent_mac, addr3="ff:ff:ff:ff:ff:ff")
-    pkt = RadioTap()/dot11/Raw(load=encrypted_msg)
+    pkt = RadioTap()/dot11/Dot11Action(category=69)/Raw(load=encrypted_msg)
     pkt.timestamp = current_timestamp()
     return pkt
 
@@ -196,7 +196,7 @@ def send_plain(msg):
     """
     encrypted = chatencrypt(msg)
     pkt = build_packet(encrypted)
-    sendp(pkt, iface=iface, verbose=0, count=25, inter=0.01)
+    sendp(pkt, monitor=True, iface=iface, verbose=0, count=25, inter=0.01)
 
 def announce_user(user, status):
     """
@@ -207,7 +207,7 @@ def announce_user(user, status):
     elif status == "left":
         encrypted_ann = chatencrypt("[USR-LFT]:" + str(user))
     pkt = build_packet(encrypted_ann)
-    sendp(pkt, iface=iface, verbose=0, count=25, inter=0.01)
+    sendp(pkt, monitor=True, iface=iface, verbose=0, count=25, inter=0.01)
 
 
 def send_encrypted_msg(msg):
@@ -218,7 +218,7 @@ def send_encrypted_msg(msg):
     if not msg.strip():
         encrypted = chatencrypt(msg)
         pkt = build_packet(encrypted)
-        sendp(pkt, iface=iface, verbose=0, count=25, inter=0.01)
+        sendp(pkt, monitor=True, iface=iface, verbose=0, count=25, inter=0.01)
         return
 
     encrypted = chatencrypt(msg)
@@ -231,7 +231,7 @@ def send_encrypted_msg(msg):
         print(f"[ghostlink] awaiting ACK for {msg_hash}")
 
     for attempt in range(count):
-        sendp(pkt, iface=iface, verbose=0, count=5, inter=0.01)
+        sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01)
         if verbose:
             print(f"[ghostlink] sent {msg_hash}, attempt {attempt+1}/{count}")
 
@@ -304,7 +304,7 @@ def send_file(path):
     print(f"[>] Sending {len(fragments)} fragments from: {path}")
     for i, frag in enumerate(fragments, 1):
         pkt = build_packet(frag)
-        sendp(pkt, iface=iface, verbose=0, count=5, inter=0.01)
+        sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01)
         print(f"  - Fragment {i}/{len(fragments)} sent")
         
 
@@ -426,7 +426,7 @@ def start_sniffer():
     """
     Starts the Scapy sniffer
     """
-    sniff(iface=iface, prn=packet_handler, store=False)
+    sniff(iface=iface, monitor=True, prn=packet_handler, store=False)
 
 def adjust_psk(psk):
     """
