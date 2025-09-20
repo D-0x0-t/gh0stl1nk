@@ -53,7 +53,7 @@ from rooms import quorum
 # ==============================
 #       General config
 # ==============================
-count = 5
+count = 10
 maxpayload = 1024
 verbose = False
 input_request_message = "message> "
@@ -80,6 +80,7 @@ def argument_parser():
     parser.add_argument("-l", "--list", dest="list_rooms", default=False, help="list available rooms", action="store_true")
     parser.add_argument("-m", "--mac", dest="persistent_mac", default=None, help="establish a custom MAC address")
     parser.add_argument("-v", "--visibility", dest="visibility", default="public", choices=["public", "private"], help="Choose room visibility (only if creating it)")
+    # add verbosity
     return parser.parse_args()   
 
 # ==============================
@@ -168,7 +169,7 @@ def wait_for_ack(msg_hash, timeout=1.0, interval=0.05):
 def send_plain(msg):
     encrypted = chat_encrypt(msg)
     pkt = build_packet(encrypted)
-    sendp(pkt, monitor=True, iface=iface, verbose=0, count=25, inter=0.01)
+    sendp(pkt, monitor=True, iface=iface, verbose=0, count=10, inter=0.01)
 
 def announce_user(user, status):
     if status == "join":
@@ -176,15 +177,16 @@ def announce_user(user, status):
     elif status == "left":
         encrypted_ann = chat_encrypt("[USR-LFT]:" + str(user))
     pkt = build_packet(encrypted_ann)
-    sendp(pkt, monitor=True, iface=iface, verbose=0, count=25, inter=0.01)
+    sendp(pkt, monitor=True, iface=iface, verbose=0, count=10, inter=0.01)
 
 
 def send_encrypted_msg(msg):
     # Empty messages (no ACK)
     if not msg.strip():
-        encrypted = chat_encrypt(msg)
-        pkt = build_packet(encrypted)
-        sendp(pkt, monitor=True, iface=iface, verbose=0, count=25, inter=0.01)
+        # excluded empty messages from the sender
+        # encrypted = chat_encrypt(msg)
+        # pkt = build_packet(encrypted)
+        # sendp(pkt, monitor=True, iface=iface, verbose=0, count=10, inter=0.01)
         return
 
     encrypted = chat_encrypt(msg)
@@ -196,8 +198,8 @@ def send_encrypted_msg(msg):
     if verbose:
         print(f"[ghostlink] awaiting ACK for {msg_hash}")
 
-    for attempt in range(count):
-        sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01)
+    for attempt in range(count): # modificado para evitar recursividad de envíos
+        sendp(pkt, monitor=True, iface=iface, verbose=0, count=1, inter=0.01)
         if verbose:
             print(f"[ghostlink] sent {msg_hash}, attempt {attempt+1}/{count}")
 
@@ -206,7 +208,7 @@ def send_encrypted_msg(msg):
                 print(f"[ACK] received for {msg_hash}")
             break
     else:
-        print(f"[✖] No ACK for {msg_hash} after {count} attempts")
+        print(f"[!] No ACK received for hash \"{msg_hash}\" after {count} attempts (messages sent)")
 
 
 def handle_ack(msg):
@@ -215,12 +217,12 @@ def handle_ack(msg):
         with ack_lock:
             if ack_hash in ack_wait:
                 if verbose:
-                    print(f"[ACK] Confirmación recibida para {ack_hash}, {msg}")
+                    print(f"[ACK] Received confirmation for {ack_hash}, {msg}")
                 del ack_wait[ack_hash]
 
 def user_joined(msg):
     sys.stdout.write("\r" + " " * (len(input_request_message) + len(current_input)) + "\r")
-    print(f"[!] User {msg.split(':', 1)[1].strip()} just joined the room.")
+    print(f"[!] User {msg.split(':', 1)[1].strip()} joined the room.")
     sys.stdout.write(input_request_message + current_input)
     sys.stdout.flush()
 
@@ -255,7 +257,7 @@ def send_file(path):
     print(f"[>] Sending {len(fragments)} fragments from: {path}")
     for i, frag in enumerate(fragments, 1):
         pkt = build_packet(frag)
-        sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01)
+        sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01) # 5 envíos por fragmento para evitar colapsos
         print(f"  - Fragment {i}/{len(fragments)} sent")
         
 
@@ -298,13 +300,13 @@ def handle_fragment(payload_b64):
 
         session = file_sessions[session_id]
         session["data"][idx] = content
-        print(f"[+] Fragmento {idx}/{total} recibido para sesión {session_id}")
+        print(f"[+] Fragment {idx}/{total} received for session ID: {session_id}")
 
         if len(session["data"]) == total:
             save_file(session_id, session["data"])
             del file_sessions[session_id]
     except Exception as e:
-        print(f"[!] Error al procesar fragmento: {e}")
+        print(f"[!] Error processing fragment: {e}")
 
 def packet_handler(pkt):
     global username, persistent_mac, room_name, registry
