@@ -1,0 +1,15 @@
+# To-Do
+- Oficial:
+// NOTE: scapy must be in v2.6 to manage the Dot11Action layer
+
+
+- Notas:
+// TODO: nomalizar sintaxis del código
+// TODO: implementar Dot11Beacon discovery
+// FIXME: arreglar la recurrencia en envío de paquetes
+// TODO: YAML para configuración de las salas
+// BUG: IMPORTANTE - revisar username que contenga el separador / inyección de código en los mensajes
+// TODO: mover los comentarios y revisiones a /docs
+// BUG?: datetime.now()
+// FIXME: modificar el flujo de mensajes para incluir los envíos en la UI
+// TODO: mejorar encriptación

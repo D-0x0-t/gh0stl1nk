@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 ghostlink_recv_*
 playground/
+todo.txt

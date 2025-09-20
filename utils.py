@@ -44,7 +44,7 @@ def checksum(data):
     """
     return sha256(data).hexdigest()[:8]
 
-def chatencrypt(username, message, cipher_key):
+def chat_encrypt(username, message, cipher_key):
     """
     Cipher message and encode it with base 64
     """
@@ -103,7 +103,7 @@ def send_plain(user, msg):
     """
     Sends an encrypted message without waiting for an ACK (announcements).
     """
-    encrypted = chatencrypt(user, msg, )
+    encrypted = chat_encrypt(user, msg, )
     pkt = build_packet(encrypted)
     for _ in range(count):
         sendp(pkt, monitor=True, iface=iface, verbose=0)
@@ -114,13 +114,13 @@ def send_encrypted_msg(user, msg):
     """
     # Empty messages (no ACK)
     if not msg.strip():
-        encrypted = chatencrypt(user, msg)
+        encrypted = chat_encrypt(user, msg)
         pkt = build_packet(encrypted)
         for _ in range(count):
             sendp(pkt, monitor=True, iface=iface, verbose=0)
         return
 
-    encrypted = chatencrypt(user, msg)
+    encrypted = chat_encrypt(user, msg)
     pkt       = build_packet(encrypted)
     msg_hash  = checksum(encrypted)
 

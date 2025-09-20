@@ -31,12 +31,12 @@ import time
 import base64
 import logging
 import argparse
-import datetime
 import warnings
 from cryptography.utils import CryptographyDeprecationWarning
 warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
 import os, sys, re
 import threading
+from datetime import datetime
 from hashlib import sha256
 from collections import deque
 from Crypto.Cipher import AES
@@ -80,8 +80,6 @@ def argument_parser():
     parser.add_argument("-l", "--list", dest="list_rooms", default=False, help="list available rooms", action="store_true")
     parser.add_argument("-m", "--mac", dest="persistent_mac", default=None, help="establish a custom MAC address")
     parser.add_argument("-v", "--visibility", dest="visibility", default="public", choices=["public", "private"], help="Choose room visibility (only if creating it)")
-
-    # args = parser.parse_args()
     return parser.parse_args()   
 
 # ==============================
@@ -115,30 +113,18 @@ def valid_mac(address):
     return bool(pattern.match(address))
 
 def pretty_printer(user, msg):
-    """
-    Prettify code output with special characters
-    """
     sys.stdout.write("\r" + " " * (len(input_request_message) + len(current_input)) + "\r")
     print(f"[{curtime()}] <{user}>: {msg}")
     sys.stdout.write(input_request_message + current_input)
     sys.stdout.flush()
 
 def current_timestamp():
-    """
-    Get the current time
-    """
     return int((time.time() - bootime) * 1000000)
 
 def checksum(data):
-    """
-    Calculate checksum of messages and return last 5 characters
-    """
     return sha256(data).hexdigest()[:8]
 
-def chatencrypt(message):
-    """
-    Cipher message and encode it with base 64
-    """
+def chat_encrypt(message):
     message = username + "~" + message
     if len(message) < maxpayload:
         message = message.rjust(maxpayload)
@@ -152,9 +138,6 @@ def chatencrypt(message):
     return base64.b64encode(iv + ciphertext)
 
 def decrypt_payload(data):
-    """
-    Decrypt message and return (user, content)
-    """
     try:
         raw = base64.b64decode(data)
         iv, ciphertext = raw[:16], raw[16:]
@@ -167,9 +150,6 @@ def decrypt_payload(data):
     return None, None
 
 def build_packet(encrypted_msg):
-    """
-    Create 802.11 packet with a payload
-    """
     global persistent_mac
     dot11 = Dot11(type=0, subtype=13, addr1="ff:ff:ff:ff:ff:ff", addr2=persistent_mac, addr3="ff:ff:ff:ff:ff:ff")
     pkt = RadioTap()/dot11/Dot11Action(category=69)/Raw(load=encrypted_msg)
@@ -177,11 +157,6 @@ def build_packet(encrypted_msg):
     return pkt
 
 def wait_for_ack(msg_hash, timeout=1.0, interval=0.05):
-    """
-    Wait for ACKs
-    Checks again every 'interval' seconds
-    If ACK, True, else False
-    """
     deadline = time.time() + timeout
     while time.time() < deadline:
         with ack_lock:
@@ -191,37 +166,28 @@ def wait_for_ack(msg_hash, timeout=1.0, interval=0.05):
     return False
 
 def send_plain(msg):
-    """
-    Sends an encrypted message without waiting for an ACK (announcements).
-    """
-    encrypted = chatencrypt(msg)
+    encrypted = chat_encrypt(msg)
     pkt = build_packet(encrypted)
     sendp(pkt, monitor=True, iface=iface, verbose=0, count=25, inter=0.01)
 
 def announce_user(user, status):
-    """
-    Announce users in the room/channel (either new users or users that left the channel)
-    """
     if status == "join":
-        encrypted_ann = chatencrypt("[USR-ANN]:" + str(user))
+        encrypted_ann = chat_encrypt("[USR-ANN]:" + str(user))
     elif status == "left":
-        encrypted_ann = chatencrypt("[USR-LFT]:" + str(user))
+        encrypted_ann = chat_encrypt("[USR-LFT]:" + str(user))
     pkt = build_packet(encrypted_ann)
     sendp(pkt, monitor=True, iface=iface, verbose=0, count=25, inter=0.01)
 
 
 def send_encrypted_msg(msg):
-    """
-    Sends the encrypted message and wait for the ACK
-    """
     # Empty messages (no ACK)
     if not msg.strip():
-        encrypted = chatencrypt(msg)
+        encrypted = chat_encrypt(msg)
         pkt = build_packet(encrypted)
         sendp(pkt, monitor=True, iface=iface, verbose=0, count=25, inter=0.01)
         return
 
-    encrypted = chatencrypt(msg)
+    encrypted = chat_encrypt(msg)
     pkt       = build_packet(encrypted)
     msg_hash  = checksum(encrypted)
 
@@ -244,9 +210,6 @@ def send_encrypted_msg(msg):
 
 
 def handle_ack(msg):
-    """
-    Manage received ACKs
-    """
     if msg.startswith("[RCV-ACK]"):
         ack_hash = msg.split(":", 1)[1].strip()
         with ack_lock:
@@ -256,27 +219,18 @@ def handle_ack(msg):
                 del ack_wait[ack_hash]
 
 def user_joined(msg):
-    """
-    Acts when a user joins the room
-    """
     sys.stdout.write("\r" + " " * (len(input_request_message) + len(current_input)) + "\r")
     print(f"[!] User {msg.split(':', 1)[1].strip()} just joined the room.")
     sys.stdout.write(input_request_message + current_input)
     sys.stdout.flush()
 
 def user_left(msg):
-    """
-    Acts when a user leaves the room
-    """
     sys.stdout.write("\r" + " " * (len(input_request_message) + len(current_input)) + "\r")
     print(f"[!] User {msg.split(':', 1)[1].strip()} left the room.")
     sys.stdout.write(input_request_message + current_input)
     sys.stdout.flush()
 
 def is_duplicate(payload):
-    """
-    Check if the message is duplicated
-    """
     try:
         _, msg = decrypt_payload(payload)
         if msg and msg.startswith("[RCV-ACK]"):
@@ -294,9 +248,6 @@ def is_duplicate(payload):
     return False
 
 def send_file(path):
-    """
-    Fragments a source file and sends each fragment {count} times
-    """
     if not os.path.isfile(path):
         print(f"[!] File not found: {path}")
         return
@@ -312,9 +263,6 @@ def send_file(path):
 #      Package Reception
 # ==============================
 def save_file(session_id, fragments_dict): # filter own messages --> username + persistent_mac
-    """
-    Orders received fragments and creates the source file in the destination system
-    """
     ordered = [fragments_dict[i] for i in sorted(fragments_dict.keys())]
     output = b"".join(ordered)
     filename = f"ghostlink_recv_{session_id}.bin"
@@ -323,9 +271,6 @@ def save_file(session_id, fragments_dict): # filter own messages --> username + 
     print(f"[+] File received and saved: {filename}")
 
 def is_fragmented_file(payload):
-    """
-    Checks if the received frame's payload is a fragmented file (or a message)
-    """
     try:
         decrypted = decrypt_fragment(payload)
         parts = decrypted.split(b"|", 2)
@@ -341,9 +286,6 @@ def is_fragmented_file(payload):
         return False
 
 def handle_fragment(payload_b64):
-    """
-    Manage file fragments
-    """
     global file_sessions
     try:
         decrypted = decrypt_fragment(payload_b64)
@@ -365,9 +307,6 @@ def handle_fragment(payload_b64):
         print(f"[!] Error al procesar fragmento: {e}")
 
 def packet_handler(pkt):
-    """
-    Scapy packet handler
-    """
     global username, persistent_mac, room_name, registry
     if pkt.haslayer(Dot11) and pkt.type == 0 and pkt.subtype == 13 and pkt.haslayer(Raw):
         raw_data = pkt[Raw].load
@@ -423,23 +362,14 @@ def welcome():
 # MAIN
 # ==============================
 def start_sniffer():
-    """
-    Starts the Scapy sniffer
-    """
     sniff(iface=iface, monitor=True, prn=packet_handler, store=False)
 
 def adjust_psk(psk):
-    """
-    Adjust the cipher_key generated from the room name
-    """
     encoded_psk = psk.encode() 
     cipher_key = pad(encoded_psk, AES.block_size)
     return cipher_key[:16]
 
 def input_loop():
-    """
-    Waits for input and decides what to do with it
-    """
     global current_input
     while True:
         try:
