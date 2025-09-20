@@ -7,9 +7,12 @@
 // TODO: nomalizar sintaxis del código
 // TODO: implementar Dot11Beacon discovery
 // FIXME: arreglar la recurrencia en envío de paquetes
-// TODO: YAML para configuración de las salas
 // BUG: IMPORTANTE - revisar username que contenga el separador / inyección de código en los mensajes
 // TODO: mover los comentarios y revisiones a /docs
 // BUG?: datetime.now()
 // FIXME: modificar el flujo de mensajes para incluir los envíos en la UI
 // TODO: mejorar encriptación
+// TODO: implementar lógica por argumentos para salas privadas
+// TODO: definir la mac en base al entorno, impersonando APs reales para ocultar tráfico
+// TODO: limitar heartbeats
+// TODO: modificar el modelo de announcements de las salas a un modelo pull, donde un cliente solicite información y cada room envíe la información de la sala en la que se encuentra

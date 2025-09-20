@@ -21,6 +21,8 @@ class Room:
             if mac not in self.members:
                 self.members.add(mac)
                 self.last_seen[mac] = time.time()
+            else:
+                self.last_seen[mac] = time.time()
 
     def remove_member(self, mac: str):
         with self.lock:
@@ -29,17 +31,11 @@ class Room:
                 self.last_seen.pop(mac, None)
 
     def heartbeat(self, mac: str):
-        """
-        Update last heartbeat timestamp of a member
-        """
         with self.lock:
             if mac in self.members:
                 self.last_seen[mac] = time.time()
 
     def prune_dead(self, timeout: float):
-        """
-        Remove inactive members
-        """
         to_remove = []
         now = time.time()
         with self.lock:
@@ -57,9 +53,6 @@ class RoomRegistry:
         self.lock = threading.Lock()
 
     def get_or_create(self, name: str, visibility: str = "public") -> Room:
-        """
-        Returns room status (if exists) or create it
-        """
         with self.lock:
             if name not in self.rooms:
                 self.rooms[name] = Room(name, visibility)
@@ -83,22 +76,13 @@ class VoteSession:
         self.timeout = timeout                  # Vote session duration
 
     def cast_vote(self, mac: str, yes: bool):
-        """
-        Saves the vote from {mac} if it's an active member and didn't vote yet
-        """
         if mac in self.room.members and mac not in self.votes:
             self.votes[mac] = yes
 
     def is_expired(self) -> bool:
-        """
-        Checks if the session is still active
-        """
         return (time.time() - self.start_time) > self.timeout
 
     def passed(self) -> bool:
-        """
-        Checks for quorum
-        """
         needed = quorum(len(self.room.members))
         yes_votes = sum(1 for v in self.votes.values() if v)
         return yes_votes >= needed
