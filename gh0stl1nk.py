@@ -254,6 +254,20 @@ def user_left(msg):
     room = registry.rooms[announcement_room]
     room.remove_member(announcement_mac)
 
+def get_potential_mac_addresses(iface):
+    possible_mac_addresses_list = []
+    def packet_handler(pkt):
+        if pkt.haslayer(Dot11) and pkt.type == 0:
+            if pkt.subtype in [1, 5, 8] and pkt.addr2 not in possible_mac_addresses_list:
+                possible_mac_addresses_list.append(pkt.addr2)
+    print("[+] Sniffing to obtain MAC addresses in use. Please wait.")
+    sniff(iface=iface, monitor=True, prn=packet_handler, store=0, timeout=30)
+    return possible_mac_addresses_list
+
+def channel_hop():
+    # meter esta función en un hilo y, durante X tiempo, hoppear por canales 2.4, 5 o ambos para obtener MACs
+    return
+
 def smart_mac(iface):
     # perform a quick scan, extract mac addresses and use one of them randomly. 
     # After joining the room, we must check for this MAC being already in use. 
