@@ -34,7 +34,7 @@ import argparse
 import warnings
 from cryptography.utils import CryptographyDeprecationWarning
 warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
-import os, sys, re
+import os, sys, re, random
 import threading
 from datetime import datetime
 from hashlib import sha256
@@ -211,7 +211,7 @@ def send_encrypted_msg(msg):
         if verbose:
             print(f"[ghostlink] sent {msg_hash}, attempt {attempt+1}/{count}")
 
-        if wait_for_ack(msg_hash, timeout=1):
+        if wait_for_ack(msg_hash, timeout=0.25):
             if verbose:
                 print(f"[ACK] received for {msg_hash}")
             break
@@ -228,7 +228,7 @@ def handle_ack(msg):
                     print(f"[ACK] Received confirmation for {ack_hash}, {msg}")
                 del ack_wait[ack_hash]
 
-def user_joined(msg): # [USR-XYZ]: {user}||{room_name}||{persistent_mac} 
+def user_joined(msg): # [USR-XYZ]: {user}||{room_name}||{persistent_mac} # responder a este mensaje con confirmación de disponibilidad de la MAC. Si está disponible, nada, si NO está disponible, solicitar cambio.
     announcement_username = msg.split(":", 1)[1].split("||")[0].strip()
     announcement_room = msg.split(":", 1)[1].split("||")[1].strip()
     announcement_mac = msg.split(":", 1)[1].split("||")[2].strip()
@@ -256,24 +256,41 @@ def user_left(msg):
 
 def get_potential_mac_addresses(iface):
     possible_mac_addresses_list = []
-    def packet_handler(pkt):
+    def gpma_packet_handler(pkt):
         if pkt.haslayer(Dot11) and pkt.type == 0:
             if pkt.subtype in [1, 5, 8] and pkt.addr2 not in possible_mac_addresses_list:
                 possible_mac_addresses_list.append(pkt.addr2)
-    print("[+] Sniffing to obtain MAC addresses in use. Please wait.")
-    sniff(iface=iface, monitor=True, prn=packet_handler, store=0, timeout=30)
+    print("[Smart-MAC] Sniffing to obtain MAC addresses in use. Please wait.")
+    sniff(iface=iface, monitor=True, prn=gpma_packet_handler, store=0, timeout=30)
     return possible_mac_addresses_list
 
-def channel_hop():
-    # meter esta función en un hilo y, durante X tiempo, hoppear por canales 2.4, 5 o ambos para obtener MACs
+def channel_hop_2_4_ghz():
+    # meter esta función en un hilo y, durante X tiempo, hoppear por canales 2.4 para obtener MACs
+    return
+
+def channel_hop_5_ghz():
+    # lo mismo para 5ghz
     return
 
 def smart_mac(iface):
     # perform a quick scan, extract mac addresses and use one of them randomly. 
     # After joining the room, we must check for this MAC being already in use. 
     # If True, then swap the MAC to another one
-
-    return
+    mac_address = ""
+    smart_mac_iterations = 0
+    while mac_address == "":
+        if smart_mac_iterations > 0:
+            print(f"[Smart-MAC] Not enough frames found, starting Smart-MAC process again...")
+        elif smart_mac_iterations == 5:
+            print(f"[Smart-MAC] Couldn't find any source address in the air. Procceeding with a random MAC.")
+            return RandMAC()._fix()
+        mac_address_list = get_potential_mac_addresses(iface)
+        if len(mac_address_list) == 0:
+            smart_mac_iterations += 1
+        else:
+            mac_address = random.choice(mac_address_list)
+    print(f"[Smart-MAC] Selected MAC address is {mac_address}")
+    return mac_address
 
 
 def is_duplicate(payload):
@@ -431,7 +448,13 @@ def input_loop():
             elif current_input.lower() == "!rooms":
                 print(f"Listing rooms:")
                 for r in registry.all_rooms():
-                    print(f"Name: {r.name}\nMembers -> {sorted(r.members)}\nTimers -> {r.last_seen}\nVisibility: {r.visibility}")
+                    if len(r.members) > 1:
+                        print(f"Room \"{r.name}\" ({r.visibility}) currently has {str(len(r.members))} clients:")
+                    else:
+                        print(f"Room \"{r.name}\" ({r.visibility}) currently has {str(len(r.members))} client:")                        
+                    for member in r.last_seen.keys():
+                        print(f"{member} --> {r.last_seen[member]}")
+                    #print(f"Name: {r.name}\nMembers -> {sorted(r.members)}\nTimers -> {r.last_seen}\nVisibility: {r.visibility}")
                 current_input = ""
             else:
                 send_encrypted_msg(current_input)
