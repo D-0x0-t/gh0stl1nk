@@ -35,8 +35,7 @@ from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import pad, unpad
 
 BLOCK_SIZE = AES.block_size
-MAX_PAYLOAD = 1024  # Ajustable según MTU efectiva
-CIPHER_KEY = b"mysharedsecret00"  # 16 bytes
+MAX_PAYLOAD = 1024
 
 # =========================
 # Cifrado / Descifrado

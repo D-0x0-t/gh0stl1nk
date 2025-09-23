@@ -445,7 +445,7 @@ def input_loop():
                 break
             elif current_input.startswith("!{") and current_input.endswith("}"):
                 send_file(current_input[2:-1].strip())
-            elif current_input.lower() == "!rooms":
+            elif current_input.lower() == "!rooms" or current_input.lower() == "!room":
                 print(f"Listing rooms:")
                 for r in registry.all_rooms():
                     if len(r.members) > 1:
@@ -498,6 +498,9 @@ if __name__ == "__main__":
             username = input("[>] Enter your username: ")
         else:
             username = args.username
+        
+        if "~" in username:
+            username = username.replace("~", "-")
         
         ## Before final execution & loop
         # Start permanent daemons
