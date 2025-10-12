@@ -9,12 +9,14 @@
 - [x] TODO: limitar heartbeats
 - [x] TODO: implementar Dot11Beacon discovery --> DESCARTADO
 - [x] FIXME: arreglar la recurrencia en envío de paquetes
-- [ ] BUG: IMPORTANTE - revisar username que contenga el separador / inyección de código en los mensajes
+- [x] TODO: definir la mac en base al entorno, impersonando APs reales para ocultar tráfico
+- [x] FIXME: modificar el flujo de mensajes para incluir los envíos en la UI
+- [x] BUG: IMPORTANTE - revisar username que contenga el separador / inyección de código en los mensajes
+- [x] TODO: Respuestas de disponibilidad de la dirección MAC
+- [x] TODO: mejorar el proceso de Smart-MAC
 - [ ] TODO: mover los comentarios y revisiones a /docs
-- [ ] FIXME: modificar el flujo de mensajes para incluir los envíos en la UI
 - [ ] TODO: mejorar encriptación
+- [ ] TODO: crear funciones de channelhop y envío de REQ-CHN para swap a canal en concreto
 - [ ] TODO: implementar lógica por argumentos para salas privadas
-- [ ] TODO: definir la mac en base al entorno, impersonando APs reales para ocultar tráfico
 - [ ] TODO: modificar el modelo de announcements de las salas a un modelo pull, donde un cliente solicite información y cada room envíe la información de la sala en la que se encuentra
-- [ ] TODO: mejorar el proceso de Smart-MAC
-- [ ] TODO: Respuestas de disponibilidad de la dirección MAC
+- [ ] BUG: Se ha identificado un bug donde, si el nombre de usuario es lo suficientemente largo, se fuerza un WARNING: Socket <scapy.arch.linux.L2ListenSocket object at 0x7fa4c12510> failed with 'list index out of range'. It was closed.

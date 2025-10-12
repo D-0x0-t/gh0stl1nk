@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 import subprocess
 import re
 from tabulate import tabulate

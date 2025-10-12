@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 # BSD 3-Clause License
 #
 # Copyright (c) 2025, Diego (0xD0t).
@@ -48,11 +50,11 @@ from scapy.all import *
 from protocol import fragment_file, decrypt_fragment, parse_decrypted
 from rooms import RoomRegistry, VoteSession, active_votes
 from rooms import quorum
+from src.channel_hop import Channel
 
-
-# ==============================
-#       General config
-# ==============================
+#
+## General config
+#
 count = 10
 maxpayload = 1024
 verbose = False
@@ -68,9 +70,9 @@ ack_lock = threading.Lock()
 current_input = ""
 HEARTBEAT_INTERVAL = 30
 
-# ==============================
-#           Argparse
-# ==============================
+#
+## Argparse
+#
 def argument_parser():
     parser = argparse.ArgumentParser(prog="gh0stl1nk", description="gh0stl1nk console")
     parser.add_argument("interface", help="interface to be used")
@@ -85,9 +87,9 @@ def argument_parser():
     parser.add_argument("--verbose", dest="verbose", default=False, help="set verbosity to True", action="store_true")
     return parser.parse_args()   
 
-# ==============================
-#            Utils
-# ==============================
+#
+## Utils
+#
 def send_heartbeat():
     global room_name, persistent_mac
     while True:
@@ -123,6 +125,12 @@ def pretty_printer(user, msg):
     sys.stdout.write("\r" + " " * (len(input_request_message) + len(current_input)) + "\r")
     print(f"[{curtime()}] <{user}>: {msg}")
     sys.stdout.write(input_request_message + current_input)
+    sys.stdout.flush()
+
+def sender_pretty_printer(user, msg):
+    sys.stdout.write('\r\x1b[2K')
+    sys.stdout.write('\x1b[1A\x1b[2K')
+    sys.stdout.write(f"[{curtime()}] <{user}>: {msg}\n")
     sys.stdout.flush()
 
 def current_timestamp():
@@ -188,6 +196,11 @@ def announce_user(user, status):
     if verbose:
             print(f"DEBUG: Announced user with {encrypted_ann}")
 
+def request_mac_swap(address, user):
+    sendp(build_packet(chat_encrypt("[REQ-MAC]:" + str(address))), monitor=True, iface=iface, verbose=0, count=10, inter=0.01)
+    if verbose:
+        print(f"DEBUG: Requested {user} to change his MAC address ({address})")
+
 def send_encrypted_msg(msg):
     # Empty messages (no ACK)
     if not msg.strip():
@@ -208,6 +221,7 @@ def send_encrypted_msg(msg):
 
     for attempt in range(count): # modificado para evitar recursividad de envíos
         sendp(pkt, monitor=True, iface=iface, verbose=0, count=1, inter=0.01)
+        sender_pretty_printer("You", current_input)
         if verbose:
             print(f"[ghostlink] sent {msg_hash}, attempt {attempt+1}/{count}")
 
@@ -217,7 +231,6 @@ def send_encrypted_msg(msg):
             break
     else:
         print(f"[!] No ACK received for hash \"{msg_hash}\" after {count} attempts (messages sent)")
-
 
 def handle_ack(msg):
     if msg.startswith("[RCV-ACK]"):
@@ -254,7 +267,7 @@ def user_left(msg):
     room = registry.rooms[announcement_room]
     room.remove_member(announcement_mac)
 
-def get_potential_mac_addresses(iface):
+def get_potential_mac_addresses(iface, blacklist):
     possible_mac_addresses_list = []
     def gpma_packet_handler(pkt):
         if pkt.haslayer(Dot11) and pkt.type == 0:
@@ -262,29 +275,35 @@ def get_potential_mac_addresses(iface):
                 possible_mac_addresses_list.append(pkt.addr2)
     print("[Smart-MAC] Sniffing to obtain MAC addresses in use. Please wait.")
     sniff(iface=iface, monitor=True, prn=gpma_packet_handler, store=0, timeout=30)
-    return possible_mac_addresses_list
+    if blacklist is None:
+        return possible_mac_addresses_list
+    else:
+        possible_mac_addresses_list.remove(blacklist)
+        return possible_mac_addresses_list
 
-def channel_hop_2_4_ghz():
-    # meter esta función en un hilo y, durante X tiempo, hoppear por canales 2.4 para obtener MACs
-    return
+def swap_mac_address():
+    global persistent_mac, args, iface
+    if args.smart_mac:
+        print("[Smart-MAC] MAC address is already in use in this room, scanning for a new one...")
+        persistent_mac = smart_mac(iface, persistent_mac)
+    else:
+        print("[!] MAC address is already in use, using a random one instead...")
+        persistent_mac = RandMAC()._fix()
 
-def channel_hop_5_ghz():
-    # lo mismo para 5ghz
-    return
-
-def smart_mac(iface):
+def smart_mac(iface, blacklist = None):
     # perform a quick scan, extract mac addresses and use one of them randomly. 
     # After joining the room, we must check for this MAC being already in use. 
     # If True, then swap the MAC to another one
     mac_address = ""
     smart_mac_iterations = 0
+    blacklist_iterations = 0
     while mac_address == "":
         if smart_mac_iterations > 0:
             print(f"[Smart-MAC] Not enough frames found, starting Smart-MAC process again...")
         elif smart_mac_iterations == 5:
             print(f"[Smart-MAC] Couldn't find any source address in the air. Procceeding with a random MAC.")
             return RandMAC()._fix()
-        mac_address_list = get_potential_mac_addresses(iface)
+        mac_address_list = get_potential_mac_addresses(iface, blacklist)
         if len(mac_address_list) == 0:
             smart_mac_iterations += 1
         else:
@@ -292,6 +311,11 @@ def smart_mac(iface):
     print(f"[Smart-MAC] Selected MAC address is {mac_address}")
     return mac_address
 
+def verify_mac_in_use(address):
+    for r in registry.all_rooms():
+        if address in r.members:
+            return True
+    return False
 
 def is_duplicate(payload):
     try:
@@ -322,9 +346,9 @@ def send_file(path):
         print(f"  - Fragment {i}/{len(fragments)} sent")
         
 
-# ==============================
-#      Package Reception
-# ==============================
+#
+## Package Reception
+#
 def save_file(session_id, fragments_dict): # filter own messages --> username + persistent_mac
     ordered = [fragments_dict[i] for i in sorted(fragments_dict.keys())]
     output = b"".join(ordered)
@@ -385,7 +409,12 @@ def packet_handler(pkt):
                 if msg.startswith("[RCV-ACK]"):
                     handle_ack(msg)
                 elif msg.startswith("[USR-ANN]"):
-                    user_joined(msg)
+                    if verify_mac_in_use(pkt[Dot11].addr2):
+                        if verbose:
+                            print(f"DEBUG: Received annnouncement from {user}, who had an address in use. Requesting him to change his MAC.")
+                        request_mac_swap(pkt[Dot11].addr2, user)
+                    else: 
+                        user_joined(msg)
                 elif msg.startswith("[USR-LFT]"):
                     user_left(msg)
                 elif msg.startswith("[USR-HB]"): # [USR-HB]||test||de:ad:be:ef:34:34||1758401590
@@ -397,15 +426,27 @@ def packet_handler(pkt):
                         room.add_member(sender)
                         room.heartbeat(sender)
                     return
+                elif msg.startswith("[REQ-MAC]"):
+                    if verbose:
+                        print(f"DEBUG: Received MAC address change request")
+                    if persistent_mac == msg.split("]:")[1]:
+                        swap_mac_address()
+                        # Re-announcing user
+                        announce_user(username, "join")
                 else:
-                    #print(f"\n[{user}]: {msg}")
+                    if verbose:
+                        print(f"DEBUG: Received message from {user} ({pkt[Dot11].addr2})")
+                    # Check if sender is already a member of the room
+                    for r in registry.all_rooms():
+                        if pkt[Dot11].addr2 not in r.members:
+                            r.add_member(pkt[Dot11].addr2)
                     pretty_printer(user, msg)                   # print received packet
                     ack = f"[RCV-ACK]: {checksum(raw_data)}"    # calculate ACK checksum
                     send_plain(ack)                             # and send it back
 
-# ==============================
-#           Others
-# ==============================
+#
+## Others
+#
 def welcome():
     greeting = """
 
@@ -423,9 +464,9 @@ def welcome():
     print("=" * 100)
 
 
-# ==============================
-# MAIN
-# ==============================
+#
+## MAIN
+#
 def start_sniffer():
     sniff(iface=iface, monitor=True, prn=packet_handler, store=False)
 
@@ -451,9 +492,11 @@ def input_loop():
                     if len(r.members) > 1:
                         print(f"Room \"{r.name}\" ({r.visibility}) currently has {str(len(r.members))} clients:")
                     else:
-                        print(f"Room \"{r.name}\" ({r.visibility}) currently has {str(len(r.members))} client:")                        
-                    for member in r.last_seen.keys():
-                        print(f"{member} --> {r.last_seen[member]}")
+                        print(f"Room \"{r.name}\" ({r.visibility}) currently has {str(len(r.members))} client:")   
+                    for member in r.members:
+                        print(f"{member} --> {r.last_seen[member]}")                     
+                    #for member in r.last_seen.keys():
+                    #    print(f"{member} --> {r.last_seen[member]}")
                     #print(f"Name: {r.name}\nMembers -> {sorted(r.members)}\nTimers -> {r.last_seen}\nVisibility: {r.visibility}")
                 current_input = ""
             else:
@@ -507,12 +550,12 @@ if __name__ == "__main__":
         registry = RoomRegistry()
         threading.Thread(target=prune_loop, daemon=True).start()
         threading.Thread(target=vote_cleanup_loop, daemon=True).start()
+        # channel = Channel(iface, wait=0.75)
 
         # Register room
         if visibility == "public":
             # todo: implementar lógica por argumentos para salas privadas
             room = registry.get_or_create(room_name, visibility=visibility) # all rooms are public by default
-            room.add_member(persistent_mac)
         # private room workflow
 
         # Set encoding key
