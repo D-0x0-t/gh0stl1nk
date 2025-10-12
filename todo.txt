@@ -20,3 +20,4 @@
 - [ ] TODO: implementar lógica por argumentos para salas privadas
 - [ ] TODO: modificar el modelo de announcements de las salas a un modelo pull, donde un cliente solicite información y cada room envíe la información de la sala en la que se encuentra
 - [ ] BUG: Se ha identificado un bug donde, si el nombre de usuario es lo suficientemente largo, se fuerza un WARNING: Socket <scapy.arch.linux.L2ListenSocket object at 0x7fa4c12510> failed with 'list index out of range'. It was closed.
+- [ ] TODO: Incluir diferentes frames de envío, testeados Dot11Action-13 (OK), Action NOACK-14 (OK), qos type=2/sub=8 (OK), Data type=2/sub=0 (ok), data type=0/sub=9 (OK), timing type=0/sub=6 (OK)

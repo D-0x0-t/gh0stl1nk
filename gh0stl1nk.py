@@ -37,7 +37,7 @@ import warnings
 from cryptography.utils import CryptographyDeprecationWarning
 warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
 import os, sys, re, random
-import threading
+import threading, subprocess
 from datetime import datetime
 from hashlib import sha256
 from collections import deque
@@ -51,6 +51,7 @@ from protocol import fragment_file, decrypt_fragment, parse_decrypted
 from rooms import RoomRegistry, VoteSession, active_votes
 from rooms import quorum
 from src.channel_hop import Channel
+from src.carriers import *
 
 #
 ## General config
@@ -221,7 +222,7 @@ def send_encrypted_msg(msg):
 
     for attempt in range(count): # modificado para evitar recursividad de envíos
         sendp(pkt, monitor=True, iface=iface, verbose=0, count=1, inter=0.01)
-        sender_pretty_printer("You", current_input)
+        sender_pretty_printer("You", current_input) # test with {username}
         if verbose:
             print(f"[ghostlink] sent {msg_hash}, attempt {attempt+1}/{count}")
 
@@ -480,13 +481,13 @@ def input_loop():
     while True:
         try:
             current_input = input(input_request_message)
-            if current_input.lower() == "!quit" or current_input.lower() == "!exit" or current_input.lower() == "!bye":
+            if current_input.lower().strip() == "!quit" or current_input.lower().strip() == "!exit" or current_input.lower().strip() == "!bye":
                 announce_user(username, "left")
                 print("\n[!] Exitting.")
                 break
             elif current_input.startswith("!{") and current_input.endswith("}"):
                 send_file(current_input[2:-1].strip())
-            elif current_input.lower() == "!rooms" or current_input.lower() == "!room":
+            elif current_input.lower().strip() == "!rooms" or current_input.lower().strip() == "!room":
                 print(f"Listing rooms:")
                 for r in registry.all_rooms():
                     if len(r.members) > 1:
@@ -499,6 +500,10 @@ def input_loop():
                     #    print(f"{member} --> {r.last_seen[member]}")
                     #print(f"Name: {r.name}\nMembers -> {sorted(r.members)}\nTimers -> {r.last_seen}\nVisibility: {r.visibility}")
                 current_input = ""
+            elif current_input == "\x0c" or current_input.lower().strip() in ["!clear", "!cls"]:
+                subprocess.run(["clear"])
+                current_input = ""
+                sys.stdout.flush()
             else:
                 send_encrypted_msg(current_input)
                 current_input = ""
@@ -550,6 +555,7 @@ if __name__ == "__main__":
         registry = RoomRegistry()
         threading.Thread(target=prune_loop, daemon=True).start()
         threading.Thread(target=vote_cleanup_loop, daemon=True).start()
+        # Channel control
         # channel = Channel(iface, wait=0.75)
 
         # Register room
