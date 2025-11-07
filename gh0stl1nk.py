@@ -171,7 +171,7 @@ def build_packet(encrypted_msg):
     # pkt = RadioTap()/dot11/Dot11Action(category=4)/Raw(load=encrypted_msg)
     # pkt.timestamp = current_timestamp()
     # New workflow with more carriers:
-    random_carrier = random.randint(0, 5)
+    random_carrier = random.randint(0, 4)
     # random_carrier = 2
     if random_carrier == 0:
         pkt = build_timing(persistent_mac, encrypted_msg, current_timestamp())
