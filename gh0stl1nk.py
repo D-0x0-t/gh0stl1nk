@@ -66,7 +66,7 @@ file_sessions = {}
 recent_messages = set()
 recent_queue = deque()
 MAX_TRACKED = 100
-ack_wait = {}  # hash -> timestamp
+ack_wait = {}
 ack_lock = threading.Lock()
 current_input = ""
 HEARTBEAT_INTERVAL = 30
@@ -78,7 +78,7 @@ def argument_parser():
     parser = argparse.ArgumentParser(prog="gh0stl1nk", description="gh0stl1nk console")
     parser.add_argument("interface", help="interface to be used")
     parser.add_argument("-b", "--bannerless", dest="bannerless", default=False, help="disable welcome banner", action="store_true")
-    parser.add_argument("-l", "--list", dest="list_rooms", default=False, help="list available rooms and exit", action="store_true") # ? revisar si tiene sentido
+    # parser.add_argument("-l", "--list", dest="list_rooms", default=False, help="list available rooms and exit", action="store_true")
     parser.add_argument("-m", "--mac", dest="persistent_mac", default=None, help="establish a custom MAC address")
     parser.add_argument("-r", "--room", dest="room", help="directly connect to a room")
     parser.add_argument("-s", "--smart-mac", dest="smart_mac", help="cover your MAC address based on the environment", action="store_true")
@@ -167,9 +167,35 @@ def decrypt_payload(data):
 
 def build_packet(encrypted_msg):
     global persistent_mac
-    dot11 = Dot11(type=0, subtype=13, addr1="ff:ff:ff:ff:ff:ff", addr2=persistent_mac, addr3="ff:ff:ff:ff:ff:ff")
-    pkt = RadioTap()/dot11/Dot11Action(category=4)/Raw(load=encrypted_msg)
-    pkt.timestamp = current_timestamp()
+    # dot11 = Dot11(type=0, subtype=13, addr1="ff:ff:ff:ff:ff:ff", addr2=persistent_mac, addr3="ff:ff:ff:ff:ff:ff")
+    # pkt = RadioTap()/dot11/Dot11Action(category=4)/Raw(load=encrypted_msg)
+    # pkt.timestamp = current_timestamp()
+    # New workflow with more carriers:
+    random_carrier = random.randint(0, 5)
+    # random_carrier = 2
+    if random_carrier == 0:
+        pkt = build_timing(persistent_mac, encrypted_msg, current_timestamp())
+        if verbose:
+            carrier_name = "Timing Advertise"
+    elif random_carrier == 1:
+        pkt = build_atim(persistent_mac, encrypted_msg, current_timestamp())
+        if verbose:
+            carrier_name = "ATIM"
+    elif random_carrier == 2:
+        pkt = build_action(persistent_mac, encrypted_msg, current_timestamp())
+        if verbose:
+            carrier_name = "Action frame (4)"
+    elif random_carrier == 3:
+        pkt = build_qos(persistent_mac, encrypted_msg, current_timestamp())
+        if verbose:
+            carrier_name = "QoS Data"
+    elif random_carrier == 4:
+        pkt = build_data(persistent_mac, encrypted_msg, current_timestamp())
+        if verbose:
+            carrier_name = "Data + LLC/SNAP"
+    
+    if verbose:
+        print(f"Using {carrier_name}")    
     return pkt
 
 def wait_for_ack(msg_hash, timeout=1.0, interval=0.05):
@@ -222,7 +248,7 @@ def send_encrypted_msg(msg):
 
     for attempt in range(count): # modificado para evitar recursividad de envíos
         sendp(pkt, monitor=True, iface=iface, verbose=0, count=1, inter=0.01)
-        sender_pretty_printer("You", current_input) # test with {username}
+        sender_pretty_printer("You", current_input)
         if verbose:
             print(f"[ghostlink] sent {msg_hash}, attempt {attempt+1}/{count}")
 
@@ -396,54 +422,55 @@ def handle_fragment(payload_b64):
 
 def packet_handler(pkt):
     global username, persistent_mac, room_name, registry
-    if pkt.haslayer(Dot11) and pkt.type == 0 and pkt.subtype == 13 and pkt.haslayer(Raw):
-        raw_data = pkt[Raw].load
-        if is_duplicate(raw_data):
-            return
-        if is_fragmented_file(raw_data): # file transmission
-            handle_fragment(raw_data)
-        else: # message transmission
-            user, msg = decrypt_payload(raw_data)
-            if user == username and pkt[Dot11].addr2 == persistent_mac: # filter own messages (sender + MAC address)
+    if pkt.haslayer(Dot11) and pkt.haslayer(Raw):
+        if (pkt.type == 0 and pkt.subtype == 6) or (pkt.type == 0 and pkt.subtype == 9) or (pkt.type == 0 and pkt.subtype == 13) or (pkt.type == 2 and pkt.subtype == 0) or (pkt.type == 2 and pkt.subtype == 8):
+            raw_data = pkt[Raw].load
+            if is_duplicate(raw_data):
                 return
-            if user and msg: 
-                if msg.startswith("[RCV-ACK]"):
-                    handle_ack(msg)
-                elif msg.startswith("[USR-ANN]"):
-                    if verify_mac_in_use(pkt[Dot11].addr2):
-                        if verbose:
-                            print(f"DEBUG: Received annnouncement from {user}, who had an address in use. Requesting him to change his MAC.")
-                        request_mac_swap(pkt[Dot11].addr2, user)
-                    else: 
-                        user_joined(msg)
-                elif msg.startswith("[USR-LFT]"):
-                    user_left(msg)
-                elif msg.startswith("[USR-HB]"): # [USR-HB]||test||de:ad:be:ef:34:34||1758401590
-                    _, rname, sender = msg.split("||")
-                    if verbose:
-                        print(f"DEBUG: Received hearbeat from {sender} on {rname}")
-                    if rname == room_name:
-                        room = registry.rooms[rname]
-                        room.add_member(sender)
-                        room.heartbeat(sender)
+            if is_fragmented_file(raw_data): # file transmission
+                handle_fragment(raw_data)
+            else: # message transmission
+                user, msg = decrypt_payload(raw_data)
+                if user == username and pkt[Dot11].addr2 == persistent_mac: # filter own messages (sender + MAC address)
                     return
-                elif msg.startswith("[REQ-MAC]"):
-                    if verbose:
-                        print(f"DEBUG: Received MAC address change request")
-                    if persistent_mac == msg.split("]:")[1]:
-                        swap_mac_address()
-                        # Re-announcing user
-                        announce_user(username, "join")
-                else:
-                    if verbose:
-                        print(f"DEBUG: Received message from {user} ({pkt[Dot11].addr2})")
-                    # Check if sender is already a member of the room
-                    for r in registry.all_rooms():
-                        if pkt[Dot11].addr2 not in r.members:
-                            r.add_member(pkt[Dot11].addr2)
-                    pretty_printer(user, msg)                   # print received packet
-                    ack = f"[RCV-ACK]: {checksum(raw_data)}"    # calculate ACK checksum
-                    send_plain(ack)                             # and send it back
+                if user and msg: 
+                    if msg.startswith("[RCV-ACK]"):
+                        handle_ack(msg)
+                    elif msg.startswith("[USR-ANN]"):
+                        if verify_mac_in_use(pkt[Dot11].addr2):
+                            if verbose:
+                                print(f"DEBUG: Received annnouncement from {user}, who had an address in use. Requesting him to change his MAC.")
+                            request_mac_swap(pkt[Dot11].addr2, user)
+                        else: 
+                            user_joined(msg)
+                    elif msg.startswith("[USR-LFT]"):
+                        user_left(msg)
+                    elif msg.startswith("[USR-HB]"): # [USR-HB]||test||de:ad:be:ef:34:34||1758401590
+                        _, rname, sender = msg.split("||")
+                        if verbose:
+                            print(f"DEBUG: Received hearbeat from {sender} on {rname}")
+                        if rname == room_name:
+                            room = registry.rooms[rname]
+                            room.add_member(sender)
+                            room.heartbeat(sender)
+                        return
+                    elif msg.startswith("[REQ-MAC]"):
+                        if verbose:
+                            print(f"DEBUG: Received MAC address change request")
+                        if persistent_mac == msg.split("]:")[1]:
+                            swap_mac_address()
+                            # Re-announcing user
+                            announce_user(username, "join")
+                    else:
+                        if verbose:
+                            print(f"DEBUG: Received message from {user} ({pkt[Dot11].addr2})")
+                        # Check if sender is already a member of the room
+                        for r in registry.all_rooms():
+                            if pkt[Dot11].addr2 not in r.members:
+                                r.add_member(pkt[Dot11].addr2)
+                        pretty_printer(user, msg)                   # print received packet
+                        ack = f"[RCV-ACK]: {checksum(raw_data)}"    # calculate ACK checksum
+                        send_plain(ack)                             # and send it back
 
 #
 ## Others
