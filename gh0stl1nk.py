@@ -43,15 +43,15 @@ from hashlib import sha256
 from collections import deque
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
-from Crypto.Util.Padding import pad, unpad
 from scapy.all import *
 
 # Gh0stl1nk internals
-from protocol import fragment_file, decrypt_fragment, parse_decrypted
-from rooms import RoomRegistry, VoteSession, active_votes
-from rooms import quorum
+from src.file_control import fragment_file, parse_decrypted
+from src.rooms import RoomRegistry, VoteSession, active_votes
+from src.rooms import quorum
 from src.channel_hop import Channel
 from src.carriers import *
+from src.crypt_utils import kdf_from_room, gcm_encrypt, gcm_decrypt
 
 #
 ## General config
@@ -141,27 +141,19 @@ def checksum(data):
     return sha256(data).hexdigest()[:8]
 
 def chat_encrypt(message):
-    message = username + "~" + message
-    if len(message) < maxpayload:
-        message = message.rjust(maxpayload)
-    else:
-        message = message[:maxpayload]
+    pt = (username + "~" + message).encode()
+    blob = gcm_encrypt(room_key, args.room, persistent_mac, pt)
+    return blob
 
-    iv = get_random_bytes(16)
-    cipher = AES.new(cipher_key, AES.MODE_CBC, iv)
-    padded = pad(message.encode(), AES.block_size)
-    ciphertext = cipher.encrypt(padded)
-    return base64.b64encode(iv + ciphertext)
-
-def decrypt_payload(data):
+def decrypt_payload(data, source_mac):
     try:
-        raw = base64.b64decode(data)
-        iv, ciphertext = raw[:16], raw[16:]
-        cipher = AES.new(cipher_key, AES.MODE_CBC, iv)
-        plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size).decode(errors="ignore")
-        if "~" in plaintext:
-            return plaintext.strip().split("~", 1)
-    except:
+        pt = gcm_decrypt(room_key, args.room, source_mac.lower(), data)
+        if not pt:
+            return None, None
+        text = pt.decode(errors="ignore")
+        if "~" in text:
+            return text.strip().split("~", 1)
+    except Exception:
         pass
     return None, None
 
@@ -344,9 +336,9 @@ def verify_mac_in_use(address):
             return True
     return False
 
-def is_duplicate(payload):
+def is_duplicate(payload, source_mac):
     try:
-        _, msg = decrypt_payload(payload)
+        _, msg = decrypt_payload(payload, source_mac)
         if msg and msg.startswith("[RCV-ACK]"):
             return False
     except:
@@ -365,12 +357,12 @@ def send_file(path):
     if not os.path.isfile(path):
         print(f"[!] File not found: {path}")
         return
-    fragments = fragment_file(path)
-    print(f"[>] Sending {len(fragments)} fragments from: {path}")
+    fragments = fragment_file(path, room_key, room_name, persistent_mac)
+    print(f"[>] Sending {len(fragments)} fragments for: {path}")
     for i, frag in enumerate(fragments, 1):
         pkt = build_packet(frag)
         sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01) # 5 envíos por fragmento para evitar colapsos
-        print(f"  - Fragment {i}/{len(fragments)} sent")
+        print(f"  - Fragment {i}/{len(fragments)} sent") # todo: improve this message
         
 
 #
@@ -384,9 +376,9 @@ def save_file(session_id, fragments_dict): # filter own messages --> username + 
         f.write(output)
     print(f"[+] File received and saved: {filename}")
 
-def is_fragmented_file(payload):
+def is_fragmented_file(payload, source_mac):
     try:
-        decrypted = decrypt_fragment(payload)
+        decrypted = gcm_decrypt(room_key, args.room, source_mac.lower(), payload)
         parts = decrypted.split(b"|", 2)
         if len(parts) < 3:
             return False
@@ -396,13 +388,13 @@ def is_fragmented_file(payload):
             return False
         current, total = map(int, index_info.split("/"))
         return 1 <= current <= total <= 9999
-    except:
+    except Exception as e:
         return False
 
-def handle_fragment(payload_b64):
+def handle_fragment(payload, source_mac):
     global file_sessions
     try:
-        decrypted = decrypt_fragment(payload_b64)
+        decrypted = gcm_decrypt(room_key, args.room, source_mac.lower(), payload)
         session_id, idx, total, content = parse_decrypted(decrypted)
         if None in (session_id, idx, total, content):
             return
@@ -425,22 +417,23 @@ def packet_handler(pkt):
     if pkt.haslayer(Dot11) and pkt.haslayer(Raw):
         if (pkt.type == 0 and pkt.subtype == 6) or (pkt.type == 0 and pkt.subtype == 9) or (pkt.type == 0 and pkt.subtype == 13) or (pkt.type == 2 and pkt.subtype == 0) or (pkt.type == 2 and pkt.subtype == 8):
             raw_data = pkt[Raw].load
-            if is_duplicate(raw_data):
+            pkt_src_mac = pkt[Dot11].addr2
+            if is_duplicate(raw_data, pkt_src_mac):
                 return
-            if is_fragmented_file(raw_data): # file transmission
-                handle_fragment(raw_data)
+            if is_fragmented_file(raw_data, pkt_src_mac): # file transmission
+                handle_fragment(raw_data, pkt_src_mac)
             else: # message transmission
-                user, msg = decrypt_payload(raw_data)
-                if user == username and pkt[Dot11].addr2 == persistent_mac: # filter own messages (sender + MAC address)
+                user, msg = decrypt_payload(raw_data, pkt_src_mac)
+                if user == username and pkt_src_mac == persistent_mac: # filter own messages (sender + MAC address)
                     return
                 if user and msg: 
                     if msg.startswith("[RCV-ACK]"):
                         handle_ack(msg)
                     elif msg.startswith("[USR-ANN]"):
-                        if verify_mac_in_use(pkt[Dot11].addr2):
+                        if verify_mac_in_use(pkt_src_mac):
                             if verbose:
                                 print(f"DEBUG: Received annnouncement from {user}, who had an address in use. Requesting him to change his MAC.")
-                            request_mac_swap(pkt[Dot11].addr2, user)
+                            request_mac_swap(pkt_src_mac, user)
                         else: 
                             user_joined(msg)
                     elif msg.startswith("[USR-LFT]"):
@@ -463,11 +456,11 @@ def packet_handler(pkt):
                             announce_user(username, "join")
                     else:
                         if verbose:
-                            print(f"DEBUG: Received message from {user} ({pkt[Dot11].addr2})")
+                            print(f"DEBUG: Received message from {user} ({pkt_src_mac})")
                         # Check if sender is already a member of the room
                         for r in registry.all_rooms():
-                            if pkt[Dot11].addr2 not in r.members:
-                                r.add_member(pkt[Dot11].addr2)
+                            if pkt_src_mac not in r.members:
+                                r.add_member(pkt_src_mac)
                         pretty_printer(user, msg)                   # print received packet
                         ack = f"[RCV-ACK]: {checksum(raw_data)}"    # calculate ACK checksum
                         send_plain(ack)                             # and send it back
@@ -497,11 +490,6 @@ def welcome():
 #
 def start_sniffer():
     sniff(iface=iface, monitor=True, prn=packet_handler, store=False)
-
-def adjust_psk(psk):
-    encoded_psk = psk.encode() 
-    cipher_key = pad(encoded_psk, AES.block_size)
-    return cipher_key[:16]
 
 def input_loop():
     global current_input
@@ -592,7 +580,7 @@ if __name__ == "__main__":
         # private room workflow
 
         # Set encoding key
-        cipher_key = adjust_psk(room_name) # adjust padding to 16
+        room_key = kdf_from_room(args.room)
 
         # Start receiver
         threading.Thread(target=start_sniffer, daemon=True).start()
