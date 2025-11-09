@@ -29,45 +29,35 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import hmac, hashlib, math, base64
-from Crypto.Cipher import AES
-from Crypto.Random import get_random_bytes
+from datetime import datetime
+import re
+import sys
+import time
 
-def checksum(data):
-    return hashlib.sha256(data).hexdigest()[:8]
+def curtime():
+    return str(datetime.now()).split(".")[0].split(" ")[1]
 
-def hkdf_sha256(ikm, salt, info, length = 32):
-    prk = hmac.new(salt, ikm, hashlib.sha256).digest()
-    okm, t, info = b"", b"", b""
-    n = math.ceil(length / hashlib.sha256().digest_size)
-    for counter in range(1, n+1):
-        t = hmac.new(prk, t + info + bytes([counter]), hashlib.sha256).digest()
-        okm += t
-    return okm[:length]
+def valid_mac(address):
+    pattern = re.compile(r'^([0-9A-Fa-f]{2}(:)){5}[0-9A-Fa-f]{2}$')
+    return bool(pattern.match(address))
 
-def kdf_from_room(room_name):
-    salt = hashlib.sha256(b"gh0stl1nk|" + room_name.encode()).digest()
-    return hkdf_sha256(room_name.encode(), salt, 32)
+def pretty_printer(user, msg, input_request_message, current_input):
+    sys.stdout.write("\r" + " " * (len(input_request_message) + len(current_input)) + "\r")
+    print(f"[{curtime()}] <{user}>: {msg}")
+    sys.stdout.write(input_request_message + current_input)
+    sys.stdout.flush()
 
-# Additional Authenticated Data
-def gen_aad(room_name, sender_mac):
-    mac = (sender_mac or "").lower()
-    return f"room={room_name}|mac={mac}".encode()
+def sender_pretty_printer(user, msg):
+    sys.stdout.write('\r\x1b[2K')
+    sys.stdout.write('\x1b[1A\x1b[2K')
+    sys.stdout.write(f"[{curtime()}] <{user}>: {msg}\n")
+    sys.stdout.flush()
 
-def gcm_encrypt(room_key, room_name, sender_mac, plaintext):
-    nonce = get_random_bytes(12)
-    cipher = AES.new(room_key, AES.MODE_GCM, nonce=nonce)
-    cipher.update(gen_aad(room_name, sender_mac))
-    ct, tag = cipher.encrypt_and_digest(plaintext)
-    return base64.b64encode(nonce + ct + tag)
-
-def gcm_decrypt(room_key, room_name, sender_mac, blob):
-    raw = base64.b64decode(blob)
-    if len(raw) < 12+16:
-        return None
-    nonce = raw[:12]
-    tag = raw[-16:]
-    ct = raw[12:-16]
-    cipher = AES.new(room_key, AES.MODE_GCM, nonce=nonce)
-    cipher.update(gen_aad(room_name, sender_mac))
-    return cipher.decrypt_and_verify(ct, tag)
+def wait_for_ack(msg_hash, ack_wait, ack_lock, timeout=1.0, interval=0.05):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with ack_lock:
+            if msg_hash not in ack_wait:
+                return True
+        time.sleep(interval)
+    return False

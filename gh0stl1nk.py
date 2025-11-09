@@ -29,6 +29,8 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+
+# Imports
 import time
 import base64
 import logging
@@ -49,13 +51,13 @@ from scapy.all import *
 from src.file_control import fragment_file, parse_decrypted
 from src.rooms import RoomRegistry, VoteSession, active_votes
 from src.rooms import quorum
+from src.utils import *
 from src.channel_hop import Channel
 from src.carriers import *
-from src.crypt_utils import kdf_from_room, gcm_encrypt, gcm_decrypt
+from src.crypt_utils import checksum, kdf_from_room, gcm_encrypt, gcm_decrypt
 
-#
-## General config
-#
+
+# General Config
 count = 10
 maxpayload = 1024
 verbose = False
@@ -71,26 +73,22 @@ ack_lock = threading.Lock()
 current_input = ""
 HEARTBEAT_INTERVAL = 30
 
-#
-## Argparse
-#
+
+# Argparse
 def argument_parser():
     parser = argparse.ArgumentParser(prog="gh0stl1nk", description="gh0stl1nk console")
     parser.add_argument("interface", help="interface to be used")
     parser.add_argument("-b", "--bannerless", dest="bannerless", default=False, help="disable welcome banner", action="store_true")
-    # parser.add_argument("-l", "--list", dest="list_rooms", default=False, help="list available rooms and exit", action="store_true")
     parser.add_argument("-m", "--mac", dest="persistent_mac", default=None, help="establish a custom MAC address")
     parser.add_argument("-r", "--room", dest="room", help="directly connect to a room")
     parser.add_argument("-s", "--smart-mac", dest="smart_mac", help="cover your MAC address based on the environment", action="store_true")
     parser.add_argument("-u", "--username", dest="username", help="your name inside gh0stl1nk")
     parser.add_argument("-v", "--visibility", dest="visibility", default="public", choices=["public", "private"], help="Choose room visibility (only if creating it)")
-    # parser.add_argument("--monitor", help="monitors the air searching for covert communications")
     parser.add_argument("--verbose", dest="verbose", default=False, help="set verbosity to True", action="store_true")
     return parser.parse_args()   
 
-#
-## Utils
-#
+
+# Local utilities
 def send_heartbeat():
     global room_name, persistent_mac
     while True:
@@ -115,30 +113,8 @@ def vote_cleanup_loop():
                 del active_votes[vid]
         time.sleep(1)
 
-def curtime():
-    return str(datetime.now()).split(".")[0].split(" ")[1]
-
-def valid_mac(address):
-    pattern = re.compile(r'^([0-9A-Fa-f]{2}(:)){5}[0-9A-Fa-f]{2}$')
-    return bool(pattern.match(address))
-
-def pretty_printer(user, msg):
-    sys.stdout.write("\r" + " " * (len(input_request_message) + len(current_input)) + "\r")
-    print(f"[{curtime()}] <{user}>: {msg}")
-    sys.stdout.write(input_request_message + current_input)
-    sys.stdout.flush()
-
-def sender_pretty_printer(user, msg):
-    sys.stdout.write('\r\x1b[2K')
-    sys.stdout.write('\x1b[1A\x1b[2K')
-    sys.stdout.write(f"[{curtime()}] <{user}>: {msg}\n")
-    sys.stdout.flush()
-
 def current_timestamp():
     return int((time.time() - bootime) * 1000000)
-
-def checksum(data):
-    return sha256(data).hexdigest()[:8]
 
 def chat_encrypt(message):
     pt = (username + "~" + message).encode()
@@ -159,12 +135,7 @@ def decrypt_payload(data, source_mac):
 
 def build_packet(encrypted_msg):
     global persistent_mac
-    # dot11 = Dot11(type=0, subtype=13, addr1="ff:ff:ff:ff:ff:ff", addr2=persistent_mac, addr3="ff:ff:ff:ff:ff:ff")
-    # pkt = RadioTap()/dot11/Dot11Action(category=4)/Raw(load=encrypted_msg)
-    # pkt.timestamp = current_timestamp()
-    # New workflow with more carriers:
     random_carrier = random.randint(0, 4)
-    # random_carrier = 2
     if random_carrier == 0:
         pkt = build_timing(persistent_mac, encrypted_msg, current_timestamp())
         if verbose:
@@ -189,15 +160,6 @@ def build_packet(encrypted_msg):
     if verbose:
         print(f"Using {carrier_name}")    
     return pkt
-
-def wait_for_ack(msg_hash, timeout=1.0, interval=0.05):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        with ack_lock:
-            if msg_hash not in ack_wait:
-                return True
-        time.sleep(interval)
-    return False
 
 def send_plain(msg):
     encrypted = chat_encrypt(msg)
@@ -244,7 +206,7 @@ def send_encrypted_msg(msg):
         if verbose:
             print(f"[ghostlink] sent {msg_hash}, attempt {attempt+1}/{count}")
 
-        if wait_for_ack(msg_hash, timeout=0.25):
+        if wait_for_ack(msg_hash, ack_wait, ack_lock, timeout=0.25):
             if verbose:
                 print(f"[ACK] received for {msg_hash}")
             break
@@ -365,9 +327,7 @@ def send_file(path):
         print(f"  - Fragment {i}/{len(fragments)} sent") # todo: improve this message
         
 
-#
-## Package Reception
-#
+# Pkt reception
 def save_file(session_id, fragments_dict): # filter own messages --> username + persistent_mac
     ordered = [fragments_dict[i] for i in sorted(fragments_dict.keys())]
     output = b"".join(ordered)
@@ -421,7 +381,8 @@ def packet_handler(pkt):
             if is_duplicate(raw_data, pkt_src_mac):
                 return
             if is_fragmented_file(raw_data, pkt_src_mac): # file transmission
-                handle_fragment(raw_data, pkt_src_mac)
+                if not pkt_src_mac == persistent_mac:
+                    handle_fragment(raw_data, pkt_src_mac)
             else: # message transmission
                 user, msg = decrypt_payload(raw_data, pkt_src_mac)
                 if user == username and pkt_src_mac == persistent_mac: # filter own messages (sender + MAC address)
@@ -461,13 +422,11 @@ def packet_handler(pkt):
                         for r in registry.all_rooms():
                             if pkt_src_mac not in r.members:
                                 r.add_member(pkt_src_mac)
-                        pretty_printer(user, msg)                   # print received packet
-                        ack = f"[RCV-ACK]: {checksum(raw_data)}"    # calculate ACK checksum
-                        send_plain(ack)                             # and send it back
+                        pretty_printer(user, msg, input_request_message, current_input) # print received packet
+                        ack = f"[RCV-ACK]: {checksum(raw_data)}"                        # calculate ACK checksum
+                        send_plain(ack)                                                 # and send it back
 
-#
-## Others
-#
+# Others
 def welcome():
     greeting = """
 
@@ -485,9 +444,7 @@ def welcome():
     print("=" * 100)
 
 
-#
-## MAIN
-#
+# Main
 def start_sniffer():
     sniff(iface=iface, monitor=True, prn=packet_handler, store=False)
 
@@ -565,8 +522,8 @@ if __name__ == "__main__":
         if "~" in username:
             username = username.replace("~", "-")
         
-        ## Before final execution & loop
-        # Start permanent daemons
+        # Before final execution & loop
+        ## Start permanent daemons
         registry = RoomRegistry()
         threading.Thread(target=prune_loop, daemon=True).start()
         threading.Thread(target=vote_cleanup_loop, daemon=True).start()
@@ -585,7 +542,9 @@ if __name__ == "__main__":
         # Start receiver
         threading.Thread(target=start_sniffer, daemon=True).start()
         
-        # Send user announcement
+        # Send user announcement & heartbeat
         announce_user(username, "join")
         threading.Thread(target=send_heartbeat, daemon=True).start()
+
+        # Start message loop
         input_loop()
