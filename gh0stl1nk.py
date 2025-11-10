@@ -40,7 +40,6 @@ from cryptography.utils import CryptographyDeprecationWarning
 warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
 import os, sys, re, random
 import threading, subprocess
-from tqdm import tqdm
 from datetime import datetime
 from hashlib import sha256
 from collections import deque
@@ -321,12 +320,11 @@ def send_file(path):
         print(f"[!] File not found: {path}")
         return
     fragments = fragment_file(path, room_key, room_name, persistent_mac)
-    with tqdm(total=len(fragments), desc="Transmitting", unit="frag", ncols=100) as bar:
-        for frag in fragments:
-            pkt = build_packet(frag)
-            sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01)
-            bar.update(1)
-        
+    print(f"[+] Transmitting {path} ({str(len(fragments))} fragments)")
+    for frag in fragments:
+        pkt = build_packet(frag)
+        sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01)
+
 # Pkt reception
 def save_file(session_id, fragments_dict, filename):
     ordered = [fragments_dict[i] for i in sorted(fragments_dict.keys())]
