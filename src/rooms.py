@@ -34,18 +34,18 @@ import math
 
 active_votes = {}
 
-def quorum(n: int) -> int:
+def quorum(n):
     return math.ceil(0.51 * n)
 
 class Room:
-    def __init__(self, name: str, visibility: str = "public"):
+    def __init__(self, name, visibility):
         self.name = name                           # Room name
         self.visibility = visibility               # Room visibility status (public/private)
         self.members = set()                       # Active MACs (clients/members)
         self.last_seen = {}                        # MAC -> last received heartbeat
         self.lock = threading.RLock()              # RLock instead of lock may solve TX storming
 
-    def add_member(self, mac: str):
+    def add_member(self, mac):
         with self.lock:
             if mac not in self.members:
                 self.members.add(mac)
@@ -53,18 +53,18 @@ class Room:
             else:
                 self.last_seen[mac] = time.time()
 
-    def remove_member(self, mac: str):
+    def remove_member(self, mac):
         with self.lock:
             if mac in self.members:
                 self.members.discard(mac)
                 self.last_seen.pop(mac, None)
 
-    def heartbeat(self, mac: str):
+    def heartbeat(self, mac):
         with self.lock:
             if mac in self.members:
                 self.last_seen[mac] = time.time()
 
-    def prune_dead(self, timeout: float):
+    def prune_dead(self, timeout):
         to_remove = []
         now = time.time()
         with self.lock:
@@ -81,13 +81,13 @@ class RoomRegistry:
         self.rooms = {}  # room_name -> Room
         self.lock = threading.Lock()
 
-    def get_or_create(self, name: str, visibility: str = "public") -> Room:
+    def get_or_create(self, name, visibility) -> Room:
         with self.lock:
             if name not in self.rooms:
                 self.rooms[name] = Room(name, visibility)
             return self.rooms[name]
 
-    def get(self, name: str) -> Room:
+    def get(self, name) -> Room:
         return self.rooms.get(name)
 
     def all_rooms(self):
@@ -95,7 +95,7 @@ class RoomRegistry:
 
 
 class VoteSession:
-    def __init__(self, room: Room, action: str, initiator: str, timeout: float = 15):
+    def __init__(self, room, action, initiator, timeout = 15):
         self.id = str(uuid.uuid4())             # Voting session ID
         self.room = room                        # Room ID
         self.action = action                    # Action to do (publish / unpublish)
@@ -104,14 +104,14 @@ class VoteSession:
         self.start_time = time.time()           # Starting timestamp
         self.timeout = timeout                  # Vote session duration
 
-    def cast_vote(self, mac: str, yes: bool):
+    def cast_vote(self, mac, yes):
         if mac in self.room.members and mac not in self.votes:
             self.votes[mac] = yes
 
-    def is_expired(self) -> bool:
+    def is_expired(self):
         return (time.time() - self.start_time) > self.timeout
 
-    def passed(self) -> bool:
+    def passed(self):
         needed = quorum(len(self.room.members))
         yes_votes = sum(1 for v in self.votes.values() if v)
         return yes_votes >= needed

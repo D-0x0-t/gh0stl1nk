@@ -76,14 +76,13 @@ HEARTBEAT_INTERVAL = 30
 
 # Argparse
 def argument_parser():
-    parser = argparse.ArgumentParser(prog="gh0stl1nk", description="gh0stl1nk console")
+    parser = argparse.ArgumentParser(prog="gh0stl1nk", description="the covert channel you didn't know you needed")
     parser.add_argument("interface", help="interface to be used")
     parser.add_argument("-b", "--bannerless", dest="bannerless", default=False, help="disable welcome banner", action="store_true")
     parser.add_argument("-m", "--mac", dest="persistent_mac", default=None, help="establish a custom MAC address")
     parser.add_argument("-r", "--room", dest="room", help="directly connect to a room")
     parser.add_argument("-s", "--smart-mac", dest="smart_mac", help="cover your MAC address based on the environment", action="store_true")
     parser.add_argument("-u", "--username", dest="username", help="your name inside gh0stl1nk")
-    parser.add_argument("-v", "--visibility", dest="visibility", default="public", choices=["public", "private"], help="Choose room visibility (only if creating it)")
     parser.add_argument("--verbose", dest="verbose", default=False, help="set verbosity to True", action="store_true")
     return parser.parse_args()   
 
@@ -183,12 +182,9 @@ def request_mac_swap(address, user):
         print(f"DEBUG: Requested {user} to change his MAC address ({address})")
 
 def send_encrypted_msg(msg):
-    # Empty messages (no ACK)
+
+    # Empty messages
     if not msg.strip():
-        # excluded empty messages from the sender
-        # encrypted = chat_encrypt(msg)
-        # pkt = build_packet(encrypted)
-        # sendp(pkt, monitor=True, iface=iface, verbose=0, count=10, inter=0.01)
         return
 
     encrypted = chat_encrypt(msg)
@@ -198,13 +194,13 @@ def send_encrypted_msg(msg):
     with ack_lock:
         ack_wait[msg_hash] = time.time()
     if verbose:
-        print(f"[ghostlink] awaiting ACK for {msg_hash}")
+        print(f"[gh0stl1nk] awaiting ACK for {msg_hash}")
 
-    for attempt in range(count): # modificado para evitar recursividad de envíos
+    for attempt in range(count):
         sendp(pkt, monitor=True, iface=iface, verbose=0, count=1, inter=0.01)
         sender_pretty_printer("You", current_input)
         if verbose:
-            print(f"[ghostlink] sent {msg_hash}, attempt {attempt+1}/{count}")
+            print(f"[gh0stl1nk] sent {msg_hash}, attempt {attempt+1}/{count}")
 
         if wait_for_ack(msg_hash, ack_wait, ack_lock, timeout=0.25):
             if verbose:
@@ -222,7 +218,7 @@ def handle_ack(msg):
                     print(f"[ACK] Received confirmation for {ack_hash}, {msg}")
                 del ack_wait[ack_hash]
 
-def user_joined(msg): # [USR-XYZ]: {user}||{room_name}||{persistent_mac} # responder a este mensaje con confirmación de disponibilidad de la MAC. Si está disponible, nada, si NO está disponible, solicitar cambio.
+def user_joined(msg): # [USR-XYZ]: {user}||{room_name}||{persistent_mac}
     announcement_username = msg.split(":", 1)[1].split("||")[0].strip()
     announcement_room = msg.split(":", 1)[1].split("||")[1].strip()
     announcement_mac = msg.split(":", 1)[1].split("||")[2].strip()
@@ -400,7 +396,7 @@ def packet_handler(pkt):
                             user_joined(msg)
                     elif msg.startswith("[USR-LFT]"):
                         user_left(msg)
-                    elif msg.startswith("[USR-HB]"): # [USR-HB]||test||de:ad:be:ef:34:34||1758401590
+                    elif msg.startswith("[USR-HB]"): # [USR-HB]||room||de:ad:be:ef:34:34||1758401590
                         _, rname, sender = msg.split("||")
                         if verbose:
                             print(f"DEBUG: Received hearbeat from {sender} on {rname}")
@@ -461,7 +457,6 @@ def input_loop():
             elif current_input.startswith("!{") and current_input.endswith("}"):
                 send_file(current_input[2:-1].strip())
             elif current_input.lower().strip() == "!rooms" or current_input.lower().strip() == "!room":
-                print(f"Listing rooms:")
                 for r in registry.all_rooms():
                     if len(r.members) > 1:
                         print(f"Room \"{r.name}\" ({r.visibility}) currently has {str(len(r.members))} clients:")
@@ -469,9 +464,6 @@ def input_loop():
                         print(f"Room \"{r.name}\" ({r.visibility}) currently has {str(len(r.members))} client:")   
                     for member in r.members:
                         print(f"{member} --> {r.last_seen[member]}")                     
-                    #for member in r.last_seen.keys():
-                    #    print(f"{member} --> {r.last_seen[member]}")
-                    #print(f"Name: {r.name}\nMembers -> {sorted(r.members)}\nTimers -> {r.last_seen}\nVisibility: {r.visibility}")
                 current_input = ""
             elif current_input == "\x0c" or current_input.lower().strip() in ["!clear", "!cls"]:
                 subprocess.run(["clear"])
@@ -488,10 +480,10 @@ def input_loop():
 if __name__ == "__main__":
     args = argument_parser()
 
-    # revisión de la interfaz
+    # Set iface
     iface = args.interface
 
-    # add verbosity to show the actual mac address
+    # MAC address control
     if args.persistent_mac:
         if valid_mac(args.persistent_mac):
             persistent_mac = str(args.persistent_mac).lower()
@@ -504,48 +496,51 @@ if __name__ == "__main__":
         else:
             persistent_mac = smart_mac(iface)
 
+    # Banner
     if not args.bannerless:
         welcome()
 
+    # Verbosity
     if args.verbose:
         verbose = True
 
+    # Visibility
     if not args.room:
-        print("flujo de control, no room, se listan rooms activas y espera")
+        visibility = "public"
     else:
         room_name = args.room
-        visibility = args.visibility
-        if not args.username:
-            username = input("[>] Enter your username: ")
-        else:
-            username = args.username
-        
-        if "~" in username:
-            username = username.replace("~", "-")
-        
-        # Before final execution & loop
-        ## Start permanent daemons
-        registry = RoomRegistry()
-        threading.Thread(target=prune_loop, daemon=True).start()
-        threading.Thread(target=vote_cleanup_loop, daemon=True).start()
-        # Channel control
-        # channel = Channel(iface, wait=0.75)
+        visibility = "private"
 
-        # Register room
-        if visibility == "public":
-            # todo: implementar lógica por argumentos para salas privadas
-            room = registry.get_or_create(room_name, visibility=visibility) # all rooms are public by default
-        # private room workflow
+    # Username control    
+    if not args.username:
+        username = input("[>] Enter your username: ")
+    else:
+        username = args.username
+    
+    if "~" in username:
+        username = username.replace("~", "-")
+    
+    # Before final execution & loop
+    ## Start permanent daemons
+    registry = RoomRegistry()
+    threading.Thread(target=prune_loop, daemon=True).start()
+    threading.Thread(target=vote_cleanup_loop, daemon=True).start()
+    # Channel control
+    # channel = Channel(iface, wait=0.75)
 
-        # Set encoding key
+    # Register room
+    room = registry.get_or_create(room_name, visibility=visibility)
+
+    # Set encoding key
+    if visibility == "private":
         room_key = kdf_from_room(args.room)
 
-        # Start receiver
-        threading.Thread(target=start_sniffer, daemon=True).start()
-        
-        # Send user announcement & heartbeat
-        announce_user(username, "join")
-        threading.Thread(target=send_heartbeat, daemon=True).start()
+    # Start receiver
+    threading.Thread(target=start_sniffer, daemon=True).start()
+    
+    # Send user announcement & heartbeat
+    announce_user(username, "join")
+    threading.Thread(target=send_heartbeat, daemon=True).start()
 
-        # Start message loop
-        input_loop()
+    # Start message loop
+    input_loop()
