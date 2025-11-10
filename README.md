@@ -1,6 +1,6 @@
 <div align="center">
     <img src="https://i.imgur.com/OyDsVBm.png" alt="gh0stlink logo" />
-    <h3>A <abbr title="Covert Channel over Wi-Fi">CCoWiFi</abbr> based on 802.11 frames.</h3>
+    <h3>A CCoWiFi<sup>1</sup> based on 802.11<sup>2</sup> frames.</h3>
     <h5>Also, a new way of sending cat pictures to your friends!</h5>
 </div>
 
@@ -64,7 +64,7 @@ $ sudo python3 iflist.py
 $ sudo python3 gh0stl1nk.py --help
 usage: gh0stl1nk [-h] [-b] [-m PERSISTENT_MAC] [-r ROOM] [-s] [-u USERNAME] [--verbose] interface
 
-the covert channel you didn't know you needed
+the covert channel you didnt know you needed
 
 positional arguments:
   interface                 interface to be used
@@ -84,3 +84,8 @@ message>
 
 ## 5.- Contributing
 Gh0stl1nk is open-source and contributions are welcome, any idea, bug, documentation improvement or whatever you can imagine that can keep the project evolving!
+
+## 6.- Acronyms
+
+- **CCoWiFi**: Stands for Covert Channel over Wi-Fi.
+- **802.11**: IEEE standard for wireless LANs.
