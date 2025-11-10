@@ -87,5 +87,5 @@ Gh0stl1nk is open-source and contributions are welcome, any idea, bug, documenta
 
 ## 6.- Acronyms
 
-- **CCoWiFi**: Stands for Covert Channel over Wi-Fi.
-- **802.11**: IEEE standard for wireless LANs.
+- (1) **CCoWiFi**: Stands for Covert Channel over Wi-Fi.
+- (2) **802.11**: IEEE standard for wireless LANs.
