@@ -40,6 +40,7 @@ from cryptography.utils import CryptographyDeprecationWarning
 warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
 import os, sys, re, random
 import threading, subprocess
+from tqdm import tqdm
 from datetime import datetime
 from hashlib import sha256
 from collections import deque
@@ -320,21 +321,20 @@ def send_file(path):
         print(f"[!] File not found: {path}")
         return
     fragments = fragment_file(path, room_key, room_name, persistent_mac)
-    print(f"[>] Sending {len(fragments)} fragments for: {path}")
-    for i, frag in enumerate(fragments, 1):
-        pkt = build_packet(frag)
-        sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01) # 5 envíos por fragmento para evitar colapsos
-        print(f"  - Fragment {i}/{len(fragments)} sent") # todo: improve this message
+    with tqdm(total=len(fragments), desc="Transmitting", unit="frag", ncols=100) as bar:
+        for frag in fragments:
+            pkt = build_packet(frag)
+            sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01)
+            bar.update(1)
         
-
 # Pkt reception
-def save_file(session_id, fragments_dict): # filter own messages --> username + persistent_mac
+def save_file(session_id, fragments_dict, filename):
     ordered = [fragments_dict[i] for i in sorted(fragments_dict.keys())]
     output = b"".join(ordered)
-    filename = f"ghostlink_recv_{session_id}.bin"
-    with open(filename, "wb") as f:
+    file = "recv/recv_" + filename
+    with open(file, "wb") as f:
         f.write(output)
-    print(f"[+] File received and saved: {filename}")
+    print(f"[+] File received and saved as {file}")
 
 def is_fragmented_file(payload, source_mac):
     try:
@@ -355,8 +355,8 @@ def handle_fragment(payload, source_mac):
     global file_sessions
     try:
         decrypted = gcm_decrypt(room_key, args.room, source_mac.lower(), payload)
-        session_id, idx, total, content = parse_decrypted(decrypted)
-        if None in (session_id, idx, total, content):
+        session_id, idx, total, filename, content = parse_decrypted(decrypted)
+        if None in (session_id, idx, total, filename, content):
             return
 
         if session_id not in file_sessions:
@@ -364,10 +364,13 @@ def handle_fragment(payload, source_mac):
 
         session = file_sessions[session_id]
         session["data"][idx] = content
-        print(f"[+] Fragment {idx}/{total} received for session ID: {session_id}")
+        if idx == 1:
+            idx1_msg = f"[+] Receiving {total} fragments for file {filename}"
+            sys.stdout.write("\r" + " " * (len(idx1_msg)) + "\r" + idx1_msg + "\n")
+            sys.stdout.flush()
 
         if len(session["data"]) == total:
-            save_file(session_id, session["data"])
+            save_file(session_id, session["data"], filename)
             del file_sessions[session_id]
     except Exception as e:
         print(f"[!] Error processing fragment: {e}")

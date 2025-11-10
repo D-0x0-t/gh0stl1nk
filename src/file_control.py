@@ -41,21 +41,23 @@ MAX_PAYLOAD = 1024
 def fragment_file(file_path, room_key, room_name, sender_mac):
     with open(file_path, "rb") as f:
         content = f.read()
+    filename = file_path.split("/")[-1]
     session_id = uuid.uuid4().hex[:8]
     chunks = []
     max_data = MAX_PAYLOAD - 32 
     total_parts = (len(content) + max_data - 1) // max_data
     for i in range(total_parts):
         part = content[i * max_data:(i + 1) * max_data]
-        header = f"{session_id}|{i+1}/{total_parts}|".encode()
+        header = f"{session_id}|{i+1}/{total_parts}|{filename}|".encode()
         chunks.append(gcm_encrypt(room_key, room_name, sender_mac, header + part))
     return chunks
 
 def parse_decrypted(decrypted):
     try:
-        meta, raw = decrypted.split(b"|", 2)[:2], decrypted.split(b"|", 2)[2]
+        meta, raw = decrypted.split(b"|", 3)[:3], decrypted.split(b"|", 3)[3]
         session_id = meta[0].decode()
         current, total = map(int, meta[1].decode().split("/"))
-        return session_id, current, total, raw
+        filename = meta[2].decode()
+        return session_id, current, total, filename, raw
     except Exception:
         return None, None, None, None

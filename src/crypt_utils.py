@@ -54,6 +54,7 @@ def gen_aad(room_name, sender_mac):
     mac = (sender_mac or "").lower()
     return f"room={room_name}|mac={mac}".encode()
 
+# Final functions
 def gcm_encrypt(room_key, room_name, sender_mac, plaintext):
     nonce = get_random_bytes(12)
     cipher = AES.new(room_key, AES.MODE_GCM, nonce=nonce)
