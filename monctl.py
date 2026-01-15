@@ -62,7 +62,7 @@ def phy_allows_vifs(phy: str) -> bool:
 
 try:
 	iface = str(sys.argv[1]).lower()
-	if iface.lower() == "kill" or iface.lower() == "del":
+	if iface.lower() == "kill" or iface.lower() == "del" or iface.lower() == "stop":
 		iface = str(sys.argv[2])
 		if not iface_exists(iface):
 			print(f"Interface {iface} isn't shown under /sys/class/net/.\nPlease try again or check your antennas.")
@@ -115,4 +115,4 @@ try:
 				p.success("Done")
 except Exception as e:
 	print(e)
-	print(f"Usage: python3 {sys.argv[0]} [kill|del] <physical interface>")
+	print(f"Usage: python3 {sys.argv[0]} [kill|del|stop] <physical interface>")

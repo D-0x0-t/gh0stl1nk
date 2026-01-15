@@ -42,6 +42,7 @@ import os, sys, re, random
 import threading, subprocess
 from datetime import datetime
 from hashlib import sha256
+from tqdm import tqdm
 from collections import deque
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
@@ -91,13 +92,13 @@ def argument_parser():
 def send_heartbeat():
     global room_name, persistent_mac
     while True:
-        heartbeat_control_msg = f"[USR-HB]||{room_name}||{persistent_mac}" # f"[USR-HB]||{room_name}||{persistent_mac}||{str(int(time.time()))}"
+        time.sleep(HEARTBEAT_INTERVAL)
+        heartbeat_control_msg = f"[USR-HB]||{room_name}||{persistent_mac}"
         send_plain(heartbeat_control_msg)
         if verbose:
             print(f"DEBUG: Sent heartbeat for room {room_name} and MAC {persistent_mac}")
         room = registry.rooms[room_name]
         room.add_member(persistent_mac)
-        time.sleep(HEARTBEAT_INTERVAL)
 
 def prune_loop():
     while True:
@@ -218,7 +219,7 @@ def handle_ack(msg):
                     print(f"[ACK] Received confirmation for {ack_hash}, {msg}")
                 del ack_wait[ack_hash]
 
-def user_joined(msg): # [USR-XYZ]: {user}||{room_name}||{persistent_mac}
+def user_joined(msg):
     announcement_username = msg.split(":", 1)[1].split("||")[0].strip()
     announcement_room = msg.split(":", 1)[1].split("||")[1].strip()
     announcement_mac = msg.split(":", 1)[1].split("||")[2].strip()
@@ -268,9 +269,6 @@ def swap_mac_address():
         persistent_mac = RandMAC()._fix()
 
 def smart_mac(iface, blacklist = None):
-    # perform a quick scan, extract mac addresses and use one of them randomly. 
-    # After joining the room, we must check for this MAC being already in use. 
-    # If True, then swap the MAC to another one
     mac_address = ""
     smart_mac_iterations = 0
     blacklist_iterations = 0
@@ -316,10 +314,11 @@ def send_file(path):
         print(f"[!] File not found: {path}")
         return
     fragments = fragment_file(path, room_key, room_name, persistent_mac)
-    print(f"[+] Transmitting {path} ({str(len(fragments))} fragments)")
-    for frag in fragments:
-        pkt = build_packet(frag)
-        sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01)
+    with tqdm(total=len(fragments), desc="Transmitting", unit="frag", ncols=100) as pbar:
+        for frag in fragments:
+            pkt = build_packet(frag)
+            sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01)
+            pbar.update(1)
 
 # Pkt reception
 def save_file(session_id, fragments_dict, filename):
@@ -396,7 +395,7 @@ def packet_handler(pkt):
                             user_joined(msg)
                     elif msg.startswith("[USR-LFT]"):
                         user_left(msg)
-                    elif msg.startswith("[USR-HB]"): # [USR-HB]||room||de:ad:be:ef:34:34||1758401590
+                    elif msg.startswith("[USR-HB]"):
                         _, rname, sender = msg.split("||")
                         if verbose:
                             print(f"DEBUG: Received hearbeat from {sender} on {rname}")
