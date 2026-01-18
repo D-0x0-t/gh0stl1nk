@@ -30,6 +30,7 @@
 import base64
 import os
 import uuid
+from zlib import compress, decompress
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import pad, unpad
@@ -44,10 +45,11 @@ def fragment_file(file_path, room_key, room_name, sender_mac):
     filename = file_path.split("/")[-1]
     session_id = uuid.uuid4().hex[:8]
     chunks = []
-    max_data = MAX_PAYLOAD - 32 
-    total_parts = (len(content) + max_data - 1) // max_data
+    max_data = MAX_PAYLOAD - 32
+    compressed_content = compress(content)
+    total_parts = (len(compressed_content) + max_data - 1) // max_data
     for i in range(total_parts):
-        part = content[i * max_data:(i + 1) * max_data]
+        part = compressed_content[i * max_data:(i + 1) * max_data]
         header = f"{session_id}|{i+1}/{total_parts}|{filename}|".encode()
         chunks.append(gcm_encrypt(room_key, room_name, sender_mac, header + part))
     return chunks

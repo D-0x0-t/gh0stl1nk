@@ -43,6 +43,7 @@ import threading, subprocess
 from datetime import datetime
 from hashlib import sha256
 from tqdm import tqdm
+from zlib import compress, decompress
 from collections import deque
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
@@ -324,9 +325,10 @@ def send_file(path):
 def save_file(session_id, fragments_dict, filename):
     ordered = [fragments_dict[i] for i in sorted(fragments_dict.keys())]
     output = b"".join(ordered)
+    decompressed = decompress(output)
     file = "recv/recv_" + filename
     with open(file, "wb") as f:
-        f.write(output)
+        f.write(decompressed)
     print(f"[+] File received and saved as {file}")
 
 def is_fragmented_file(payload, source_mac):
