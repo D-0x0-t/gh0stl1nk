@@ -44,22 +44,40 @@ def fragment_file(file_path, room_key, room_name, sender_mac):
         content = f.read()
     filename = file_path.split("/")[-1]
     session_id = uuid.uuid4().hex[:8]
-    chunks = []
+    chunks = {}
     max_data = MAX_PAYLOAD - 32
     compressed_content = compress(content)
     total_parts = (len(compressed_content) + max_data - 1) // max_data
     for i in range(total_parts):
-        part = compressed_content[i * max_data:(i + 1) * max_data]
-        header = f"{session_id}|{i+1}/{total_parts}|{filename}|".encode()
-        chunks.append(gcm_encrypt(room_key, room_name, sender_mac, header + part))
-    return chunks
+        idx = i + 1
+        part = compressed_content[i * max_data:(idx) * max_data]
+        header = f"{session_id}|{idx}/{total_parts}|{filename}|".encode()
+        # chunks.append(gcm_encrypt(room_key, room_name, sender_mac, header + part))
+        chunks[idx] = gcm_encrypt(room_key, room_name, sender_mac, header + part)
 
+    return session_id, total_parts, filename, chunks 
+
+#def parse_decrypted(decrypted):
+#    try:
+#        meta, raw = decrypted.split(b"|", 3)[:3], decrypted.split(b"|", 3)[3]
+#        session_id = meta[0].decode()
+#        current, total = map(int, meta[1].decode().split("/"))
+#        filename = meta[2].decode()
+#        return session_id, current, total, filename, raw
+#    except Exception:
+#        return None, None, None, None
 def parse_decrypted(decrypted):
     try:
-        meta, raw = decrypted.split(b"|", 3)[:3], decrypted.split(b"|", 3)[3]
-        session_id = meta[0].decode()
-        current, total = map(int, meta[1].decode().split("/"))
-        filename = meta[2].decode()
-        return session_id, current, total, filename, raw
-    except Exception:
+        parts = decrypted.split(b"|", 3)
+        if len(parts) != 4:
+            return None, None, None, None
+        
+        session_id = parts[0].decode(errors="ignore")
+        idx_str = parts[1].decode(errors="ignore")
+        filename = parts[2].decode(errors="ignore")
+        content = parts[3]
+        
+        idx, total = map(int, idx_str.split("/", 1))
+        return session_id, idx, total, filename, content
+    except:
         return None, None, None, None

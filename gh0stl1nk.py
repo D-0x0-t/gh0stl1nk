@@ -47,7 +47,9 @@ from zlib import compress, decompress
 from collections import deque
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
-from scapy.all import *
+from scapy.all import sniff, sendp, Raw, conf
+from scapy.layers.dot11 import RadioTap, Dot11
+from scapy.volatile import RandMAC
 
 # Gh0stl1nk internals
 from src.file_control import fragment_file, parse_decrypted
@@ -60,21 +62,31 @@ from src.crypt_utils import checksum, kdf_from_room, gcm_encrypt, gcm_decrypt
 
 
 # General Config
-count = 10
-maxpayload = 1024
-verbose = False
-input_request_message = "message> "
+count = 10 # default number of times each packet is sent
+maxpayload = 1024 # maximum payload size (based on MTU - pkt default size)
+verbose = False # default verbosity
+input_request_message = "message> " # user prompt
 
 bootime = time.time()
-file_sessions = {}
-recent_messages = set()
-recent_queue = deque()
+recent_messages = set() # prevent loopback
+recent_queue = deque() # prevent loopback
 MAX_TRACKED = 100
 ack_wait = {}
 ack_lock = threading.Lock()
 current_input = ""
-HEARTBEAT_INTERVAL = 30
+HEARTBEAT_INTERVAL = 30 # timer for sending heartbeats to other room members
 
+# File transfer config
+file_sessions = {} # file sessions dict
+tx_sessions_cache = {} # file sessions cache (for NACK)
+FILE_ACK_HEADER_PREFIX = "[FILE-ACK]:" # file ACK header
+FILE_NACK_HEADER_PREFIX = "[FILE-NACK]:" # file Negative ACK header
+FILE_IDLE_TOUT = 5.0 # seconds without RX activity before requesting fragment retransmission
+FILE_NACK_CD = 1.0 # min seconds between NACKs
+FILE_NACK_BATCH = 50 # max fragment retransmission requests per NACK
+FILE_RX_CLOSE = 120 # time to drop incomplete sessions
+TX_SESSION_CACHE_TIMER = 120.0 # time to keep fragments cached without receiving file ACK
+TX_IDX_MAX_RETRIES = 10 # max rertansmission attempts
 
 # Argparse
 def argument_parser():
@@ -162,6 +174,7 @@ def build_packet(encrypted_msg):
         print(f"Using {carrier_name}")    
     return pkt
 
+# ACK untracked
 def send_plain(msg):
     encrypted = chat_encrypt(msg)
     pkt = build_packet(encrypted)
@@ -190,7 +203,7 @@ def send_encrypted_msg(msg):
         return
 
     encrypted = chat_encrypt(msg)
-    pkt       = build_packet(encrypted)
+    pkt = build_packet(encrypted)
     msg_hash  = checksum(encrypted)
 
     with ack_lock:
@@ -219,6 +232,48 @@ def handle_ack(msg):
                 if verbose:
                     print(f"[ACK] Received confirmation for {ack_hash}, {msg}")
                 del ack_wait[ack_hash]
+
+def handle_file_ack(msg):
+    try:
+        session_id = msg.split(FILE_ACK_HEADER_PREFIX, 1)[1].strip()
+    except Exception:
+        return
+    
+    if session_id in tx_sessions_cache:
+        if verbose:
+            print(f"ACK received for session {session_id}, clearing TX cache")
+        del tx_sessions_cache[session_id]
+
+def handle_file_nack(msg):
+    try:
+        payload = msg.split(FILE_NACK_HEADER_PREFIX, 1)[1].strip()
+        session_id, missing_csv = payload.split("|", 1)
+        session_id = session_id.strip()
+        missing = [int(x) for x in missing_csv.split(",") if x.strip().isdigit()]
+    except Exception:
+        return
+    
+    sess = tx_sessions_cache.get(session_id)
+    if not sess:
+        return
+
+    total = sess.get("total")
+    for idx in missing:
+        retries = sess["retries"].get(idx, 0)
+        if retries >= TX_IDX_MAX_RETRIES:
+            continue
+        frag = sess["fragments"].get(idx)
+        if not frag:
+            continue
+        
+        pkt = build_packet(frag)
+        sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01)
+
+        sess["last_activity_ts"] = time.time()
+        sess["retries"][idx] = retries + 1
+
+        if verbose:
+            print(f"[FILE-NACK] Retransmitted {session_id} fragment {idx}/{total}, retry {sess['retries'][idx]}")
 
 def user_joined(msg):
     announcement_username = msg.split(":", 1)[1].split("||")[0].strip()
@@ -314,11 +369,31 @@ def send_file(path):
     if not os.path.isfile(path):
         print(f"[!] File not found: {path}")
         return
-    fragments = fragment_file(path, room_key, room_name, persistent_mac)
-    with tqdm(total=len(fragments), desc="Transmitting", unit="frag", ncols=100) as pbar:
-        for frag in fragments:
+    # fragments = fragment_file(path, room_key, room_name, persistent_mac)
+    session_id, total_parts, filename, fragments = fragment_file(path, room_key, room_name, persistent_mac)
+
+    tx_sessions_cache[session_id] = {
+        "total": total_parts, 
+        "filename": filename, 
+        "fragments": fragments, 
+        "created_ts": time.time(), 
+        "last_activity_ts": time.time(), 
+        "retries": {}
+    }
+
+    #with tqdm(total=len(fragments), desc="Transmitting", unit="frag", ncols=100) as pbar:
+    #    for frag in fragments:
+    #        pkt = build_packet(frag)
+    #        sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01)
+    #        pbar.update(1)
+    sess = tx_sessions_cache[session_id]
+
+    with tqdm(total=total_parts, desc="Transmitting", unit="frag", ncols=100) as pbar:
+        for idx in range(1, total_parts + 1):
+            frag = fragments[idx]
             pkt = build_packet(frag)
             sendp(pkt, monitor=True, iface=iface, verbose=0, count=5, inter=0.01)
+            sess["last_activity_ts"] = time.time()
             pbar.update(1)
 
 # Pkt reception
@@ -330,6 +405,37 @@ def save_file(session_id, fragments_dict, filename):
     with open(file, "wb") as f:
         f.write(decompressed)
     print(f"[+] File received and saved as {file}")
+
+def file_rx_monitor():
+    while True:
+        now = time.time()
+
+        for session_id, session in list(file_sessions.items()):
+            total = session.get("total")
+            data = session.get("data", {})
+            last_rx = session.get("last_rx_ts", now)
+            last_nack = session.get("last_nack_ts", 0.0)
+            
+            if not total:
+                continue
+
+            if len(data) != total and (now - last_rx) >= FILE_IDLE_TOUT and (now - last_nack) >= FILE_NACK_CD:
+                missing = [i for i in range(1, total + 1) if i not in data]
+                if missing:
+                    batch = missing[:FILE_NACK_BATCH]
+                    nack_msg = f"{FILE_NACK_HEADER_PREFIX}{session_id}|{','.join(map(str, batch))}"
+                    send_plain(nack_msg)
+                    session["last_nack_ts"] = now
+            
+            if len(data) != total and (now - last_rx) > FILE_RX_CLOSE:
+                del file_sessions[session_id]
+            
+        for session_id, sess in list(tx_sessions_cache.items()):
+            last = sess.get("last_activity_ts", sess.get("created_ts", now))
+            if (now - last) > TX_SESSION_CACHE_TIMER:
+                del tx_sessions_cache[session_id]
+        
+        time.sleep(1)
 
 def is_fragmented_file(payload, source_mac):
     try:
@@ -355,10 +461,17 @@ def handle_fragment(payload, source_mac):
             return
 
         if session_id not in file_sessions:
-            file_sessions[session_id] = {"total": total, "data": {}}
+            file_sessions[session_id] = {
+                "total": total, 
+                "data": {}, 
+                "last_rx_ts": time.time(), 
+                "last_nack_ts": 0.0
+            }
 
         session = file_sessions[session_id]
         session["data"][idx] = content
+        session["last_rx_ts"] = time.time()
+
         if idx == 1:
             idx1_msg = f"[+] Receiving {total} fragments for file {filename}"
             sys.stdout.write("\r" + " " * (len(idx1_msg)) + "\r" + idx1_msg + "\n")
@@ -366,6 +479,7 @@ def handle_fragment(payload, source_mac):
 
         if len(session["data"]) == total:
             save_file(session_id, session["data"], filename)
+            send_plain(f"{FILE_ACK_HEADER_PREFIX}{session_id}")
             del file_sessions[session_id]
     except Exception as e:
         print(f"[!] Error processing fragment: {e}")
@@ -385,7 +499,7 @@ def packet_handler(pkt):
                 user, msg = decrypt_payload(raw_data, pkt_src_mac)
                 if user == username and pkt_src_mac == persistent_mac: # filter own messages (sender + MAC address)
                     return
-                if user and msg: 
+                if user and msg:
                     if msg.startswith("[RCV-ACK]"):
                         handle_ack(msg)
                     elif msg.startswith("[USR-ANN]"):
@@ -395,6 +509,10 @@ def packet_handler(pkt):
                             request_mac_swap(pkt_src_mac, user)
                         else: 
                             user_joined(msg)
+                    elif msg.startswith(FILE_NACK_HEADER_PREFIX):
+                        handle_file_nack(msg)
+                    elif msg.startswith(FILE_ACK_HEADER_PREFIX):
+                        handle_file_ack(msg)
                     elif msg.startswith("[USR-LFT]"):
                         user_left(msg)
                     elif msg.startswith("[USR-HB]"):
@@ -538,6 +656,9 @@ if __name__ == "__main__":
 
     # Start receiver
     threading.Thread(target=start_sniffer, daemon=True).start()
+
+    # Start file RX monitor
+    threading.Thread(target=file_rx_monitor, daemon=True).start()
     
     # Send user announcement & heartbeat
     announce_user(username, "join")
