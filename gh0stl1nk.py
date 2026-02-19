@@ -67,6 +67,8 @@ maxpayload = 1024 # maximum payload size (based on MTU - pkt default size)
 verbose = False # default verbosity
 input_request_message = "message> " # user prompt
 
+encryption = True # Enables / disables encryption
+
 bootime = time.time()
 recent_messages = set() # prevent loopback
 recent_queue = deque() # prevent loopback
@@ -97,6 +99,7 @@ def argument_parser():
     parser.add_argument("-r", "--room", dest="room", help="directly connect to a room")
     parser.add_argument("-s", "--smart-mac", dest="smart_mac", help="cover your MAC address based on the environment", action="store_true")
     parser.add_argument("-u", "--username", dest="username", help="your name inside gh0stl1nk")
+    parser.add_argument("-n", "--no-crypto", action="store_true", help="Disable encryption")
     parser.add_argument("--verbose", dest="verbose", default=False, help="set verbosity to True", action="store_true")
     return parser.parse_args()   
 
@@ -131,17 +134,24 @@ def current_timestamp():
 
 def chat_encrypt(message):
     pt = (username + "~" + message).encode()
-    blob = gcm_encrypt(room_key, args.room, persistent_mac, pt)
-    return blob
+    if not encryption:
+        return pt
+    else:
+        return gcm_encrypt(room_key, args.room, persistent_mac, pt)
 
 def decrypt_payload(data, source_mac):
     try:
-        pt = gcm_decrypt(room_key, args.room, source_mac.lower(), data)
-        if not pt:
-            return None, None
-        text = pt.decode(errors="ignore")
-        if "~" in text:
-            return text.strip().split("~", 1)
+        if not encryption:
+            pt = data.decode(errors="ignore")
+            if "~" in text:
+                return text.strip().split("~", 1)
+        else:
+            pt = gcm_decrypt(room_key, args.room, source_mac.lower(), data)
+            if not pt:
+                return None, None
+            text = pt.decode(errors="ignore")
+            if "~" in text:
+                return text.strip().split("~", 1)
     except Exception:
         pass
     return None, None
@@ -622,6 +632,10 @@ if __name__ == "__main__":
     # Verbosity
     if args.verbose:
         verbose = True
+
+    # Encryption
+    if args.no_crypto:
+        encryption = False
 
     # Visibility
     if not args.room:
